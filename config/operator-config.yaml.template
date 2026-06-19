@@ -1,0 +1,22 @@
+# Operator-local configuration (per node).
+# Merge on top of network-config.yaml — these values override network defaults.
+#
+# Usage:
+#   aicw-node start --name mynode \
+#     --network-config network-config.yaml \
+#     --config operator-config.yaml \
+#     -f password.txt
+#
+# Minimal path: keep badger password in password.txt and pass -f password.txt
+# instead of storing it here.
+
+db_path: "."
+backup_enabled: true
+backup_period_seconds: 300
+backup_dir: backups
+max_concurrent_keygen: 2
+max_concurrent_signing: 10
+
+healthcheck:
+  enabled: false
+  address: "0.0.0.0:8080"

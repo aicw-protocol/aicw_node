@@ -1,0 +1,141 @@
+# AICW MPC Node Network - Docker Compose
+#
+# AICW-FORK: Test environment for Phase A dynamic peer network.
+#
+# This sets up:
+# - 3 MPC nodes (node1, node2, node3)
+# - Consul for service discovery and KV store
+# - NATS for messaging
+#
+# Usage:
+#   docker-compose up -d
+#   docker-compose logs -f node1
+
+version: '3.8'
+
+services:
+  # Consul - Service Discovery & KV Store
+  consul:
+    image: hashicorp/consul:1.18
+    container_name: mpc-consul
+    command: agent -dev -client=0.0.0.0
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    environment:
+      CONSUL_BIND_INTERFACE: eth0
+    networks:
+      - mpc-network
+
+  # NATS - Messaging
+  nats:
+    image: nats:2.10-alpine
+    container_name: mpc-nats
+    command: 
+      - "--jetstream"
+      - "--store_dir=/data"
+    ports:
+      - "4222:4222"
+      - "8222:8222"  # HTTP monitoring
+    volumes:
+      - nats-data:/data
+    networks:
+      - mpc-network
+
+  # MPC Node 1
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mpc-node1
+    environment:
+      NODE_NAME: node1
+      CONSUL_HTTP_ADDR: consul:8500
+      NATS_URL: nats://nats:4222
+      MPC_THRESHOLD: "1"
+      ELIGIBILITY_INITIATOR_MODE: whitelist
+      ELIGIBILITY_MEMBERSHIP_MODE: whitelist
+      ELIGIBILITY_WHITELIST_SOURCE: consul
+    volumes:
+      - ./identity/node1:/app/identity
+      - ./config:/app/config:ro
+    depends_on:
+      - consul
+      - nats
+    networks:
+      - mpc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # MPC Node 2
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mpc-node2
+    environment:
+      NODE_NAME: node2
+      CONSUL_HTTP_ADDR: consul:8500
+      NATS_URL: nats://nats:4222
+      MPC_THRESHOLD: "1"
+      ELIGIBILITY_INITIATOR_MODE: whitelist
+      ELIGIBILITY_MEMBERSHIP_MODE: whitelist
+      ELIGIBILITY_WHITELIST_SOURCE: consul
+    volumes:
+      - ./identity/node2:/app/identity
+      - ./config:/app/config:ro
+    depends_on:
+      - consul
+      - nats
+    networks:
+      - mpc-network
+
+  # MPC Node 3
+  node3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mpc-node3
+    environment:
+      NODE_NAME: node3
+      CONSUL_HTTP_ADDR: consul:8500
+      NATS_URL: nats://nats:4222
+      MPC_THRESHOLD: "1"
+      ELIGIBILITY_INITIATOR_MODE: whitelist
+      ELIGIBILITY_MEMBERSHIP_MODE: whitelist
+      ELIGIBILITY_WHITELIST_SOURCE: consul
+    volumes:
+      - ./identity/node3:/app/identity
+      - ./config:/app/config:ro
+    depends_on:
+      - consul
+      - nats
+    networks:
+      - mpc-network
+
+  # Operator CLI - For managing whitelists
+  # SECURITY WARNING: This container has write access to whitelists.
+  # In production, this should be secured with proper authentication.
+  operator:
+    build:
+      context: .
+      dockerfile: Dockerfile.operator
+    container_name: mpc-operator
+    environment:
+      CONSUL_HTTP_ADDR: consul:8500
+    depends_on:
+      - consul
+    networks:
+      - mpc-network
+    # Keep container running for manual operations
+    command: ["tail", "-f", "/dev/null"]
+
+networks:
+  mpc-network:
+    driver: bridge
+
+volumes:
+  nats-data:

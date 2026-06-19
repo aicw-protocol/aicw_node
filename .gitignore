@@ -1,0 +1,35 @@
+# Secrets (never commit)
+**/identity/*_private_key.txt
+**/identity/*_private.key
+**/password.txt
+*.key
+*.age
+
+# Build artifacts
+*.exe
+*.exe~
+/aicw-node
+/operator
+/mpc-bridge
+/mpcium-node
+
+# Runtime / local data
+test-local/
+**/backups/
+**/*.db
+**/badger/
+
+# Local documentation (not published to remote)
+docs/
+findings/
+begin.md
+
+# Go
+/vendor/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+dev/

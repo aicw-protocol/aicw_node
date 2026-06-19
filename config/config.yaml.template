@@ -1,0 +1,90 @@
+# AICW MPC Node Configuration Template
+# 
+# AICW-FORK: This extends the original Mpcium config with eligibility settings.
+# Copy this file to config.yaml and customize for your deployment.
+
+# Node identity
+node_name: "node1"  # Unique name for this node
+
+# MPC parameters
+mpc_threshold: 1  # t-of-n threshold (t+1 signatures required)
+
+# NATS messaging
+nats:
+  url: "nats://nats:4222"
+  # For JetStream
+  stream_name: "mpc_events"
+
+# Consul configuration
+consul:
+  address: "consul:8500"
+  token: ""  # Optional ACL token
+
+# Eligibility configuration (AICW-FORK)
+eligibility:
+  # Initiator verification mode: "legacy", "whitelist", or "stake"
+  # - legacy: Single pubkey from event_initiator_pubkey (upstream compatible)
+  # - whitelist: Multiple allowed Coordinator pubkeys
+  # - stake: Phase C staking-based verification (not implemented)
+  initiator_mode: "whitelist"
+  
+  # Membership verification mode: "whitelist" or "stake"
+  # - whitelist: Operator-managed peer whitelist
+  # - stake: Phase C staking-based verification (not implemented)
+  membership_mode: "whitelist"
+  
+  # Whitelist source: "consul" or "file"
+  whitelist_source: "consul"
+  
+  # Consul key prefixes for whitelists
+  initiator_whitelist_prefix: "mpc_eligibility/initiator_whitelist/"
+  membership_whitelist_prefix: "mpc_eligibility/membership_whitelist/"
+
+# Dynamic peer management (AICW-FORK)
+dynamic_peers:
+  # Enable dynamic peer discovery from Consul
+  enabled: true
+  
+  # Consul key prefix for peer identities
+  identity_prefix: "mpc_node_identity/"
+  
+  # How often to refresh peer list (seconds)
+  refresh_interval: 5
+
+# Legacy configuration (for backward compatibility)
+# Used when eligibility.initiator_mode = "legacy"
+event_initiator_pubkey: ""  # Hex-encoded Ed25519 public key
+event_initiator_algorithm: "ed25519"  # "ed25519" or "p256"
+
+# Identity file paths
+identity:
+  directory: "./identity"
+  # Set to true to use encrypted private keys (*.key.age)
+  decrypt: false
+  # Path to file containing age password (optional)
+  password_file: ""
+
+# Logging
+log:
+  level: "info"  # "debug", "info", "warn", "error"
+  format: "json"  # "json" or "text"
+
+# Health check
+health:
+  # Port for health check endpoint
+  port: 8080
+
+# SECURITY WARNINGS (AICW-FORK):
+#
+# 1. Whitelist Single Point of Failure
+#    In Phase A, the operator has sole control over whitelists.
+#    This is acceptable for testnet but must be addressed before mainnet.
+#    See: pkg/eligibility/whitelist_*.go for details.
+#
+# 2. Identity File Security
+#    Private keys should be encrypted (decrypt: true) in production.
+#    Never commit unencrypted private keys to version control.
+#
+# 3. Consul ACL
+#    Enable Consul ACL and use tokens in production.
+#    The eligibility whitelists should be write-protected.

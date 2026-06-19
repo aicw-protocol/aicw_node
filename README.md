@@ -1,0 +1,28 @@
+# AICW MPC Node
+
+A permissionless MPC node for distributed signing of AICW AI-agent wallets on Solana.
+
+## Overview
+
+AICW MPC Node is a threshold signing participant in the AICW network. Each node receives keygen and signing requests over NATS, joins an MPC ceremony with peer nodes, and contributes its share to produce Ed25519/ECDSA keys and signatures without ever exposing a full private key on a single machine.
+
+Nodes discover peers dynamically via Consul, verify membership against an operator-managed whitelist (Phase A), and exchange session keys over NATS before participating in TSS operations.
+
+## Status
+
+**Work in progress.** Phase A (dynamic join) is under active development and not yet production-ready. **Do not use with real funds.**
+
+## Build
+
+```bash
+go build -o aicw-node ./cmd/aicw-node
+go build -o operator ./cmd/operator
+```
+
+## Documentation
+
+Detailed operator and design notes live under `docs/` and `findings/` locally. Those directories are excluded from this repository.
+
+## License
+
+MIT
