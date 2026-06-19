@@ -21,7 +21,8 @@ go build -o operator ./cmd/operator
 
 ## Documentation
 
-Detailed operator and design notes live under `docs/` and `findings/` locally. Those directories are excluded from this repository.
+See the inline code comments and `config/*.template` files for configuration options.
+Operator and design documentation will be published as the project matures.
 
 ## License
 
