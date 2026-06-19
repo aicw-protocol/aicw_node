@@ -1,0 +1,24 @@
+AICW MPC Node
+Copyright (c) 2026 AICW Protocol
+
+This project is a derivative work of Mpcium (https://github.com/fystack/mpcium).
+New and modified source code in this repository is licensed under the MIT License.
+See LICENSE.
+
+Portions of this software are derived from Mpcium and remain licensed under the
+Apache License, Version 2.0. The full text of that license is preserved
+unchanged in LICENSE-MPCIUM. Do not remove LICENSE-MPCIUM when redistributing.
+
+Mpcium
+Copyright Fystack
+Licensed under the Apache License, Version 2.0
+See LICENSE-MPCIUM
+
+tss-lib
+Copyright (c) 2019 Binance
+Licensed under the MIT License
+See LICENSE-TSS-LIB
+
+This product depends on github.com/fystack/tss-lib/v2 (fork of
+github.com/bnb-chain/tss-lib/v2), used via github.com/fystack/mpcium for
+threshold signing operations.

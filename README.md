@@ -26,4 +26,9 @@ Operator and design documentation will be published as the project matures.
 
 ## License
 
-MIT
+New and modified code in this repository is licensed under the [MIT License](LICENSE).
+
+This project is derived from [Mpcium](https://github.com/fystack/mpcium). The
+original Apache License 2.0 text is preserved in [LICENSE-MPCIUM](LICENSE-MPCIUM)
+and must not be removed. Third-party notices, including tss-lib, are in
+[NOTICE](NOTICE).
