@@ -461,28 +461,41 @@ func (s *DynamicFileStore) WatchPeerDirectory(onPeerChange func(nodeID string, a
 				newPeers[identity.NodeID] = pubKey
 			}
 
-			// Detect additions and removals
+			// Detect additions and removals while holding the store lock, but
+			// invoke the callbacks AFTER releasing it.
+			//
+			// AICW-FORK FIX: the onPeerChange callback (registry.AddPeer) calls
+			// back into this store (GetPublicKey / RegisterPeerPublicKey), which
+			// take s.mu. sync.RWMutex is not reentrant, so calling the callback
+			// while holding s.mu.Lock() deadlocked the watch goroutine the first
+			// time a peer joined after startup — the node that started first
+			// never discovered later peers. Mutating the map under the lock and
+			// firing callbacks outside it fixes the dynamic-join path.
+			var added, removed []string
 			s.mu.Lock()
 			for nodeID := range newPeers {
 				if _, exists := s.peerPublicKeys[nodeID]; !exists {
-					// New peer added
 					s.peerPublicKeys[nodeID] = newPeers[nodeID]
-					if onPeerChange != nil {
-						onPeerChange(nodeID, true)
-					}
+					added = append(added, nodeID)
 				}
 			}
 			for nodeID := range s.peerPublicKeys {
 				if _, exists := newPeers[nodeID]; !exists {
-					// Peer removed
 					delete(s.peerPublicKeys, nodeID)
 					delete(s.symmetricKeys, nodeID)
-					if onPeerChange != nil {
-						onPeerChange(nodeID, false)
-					}
+					removed = append(removed, nodeID)
 				}
 			}
 			s.mu.Unlock()
+
+			if onPeerChange != nil {
+				for _, nodeID := range added {
+					onPeerChange(nodeID, true)
+				}
+				for _, nodeID := range removed {
+					onPeerChange(nodeID, false)
+				}
+			}
 		}
 	}()
 

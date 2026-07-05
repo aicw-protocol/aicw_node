@@ -1,6 +1,8 @@
 package eligibility
 
 import (
+	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +10,29 @@ import (
 
 	"github.com/hashicorp/consul/api"
 )
+
+// ed25519RawPublicKeySize is the byte length of a raw Ed25519 public key.
+const ed25519RawPublicKeySize = 32
+
+// normalizePublicKey returns the canonical raw byte form of a public key.
+//
+// A 32-byte input is already raw and returned as-is. A 64-character ASCII
+// hex string is decoded to its 32 raw bytes. Anything else is returned
+// unchanged.
+//
+// AICW-FORK FIX (P0): This ONLY canonicalizes the representation (hex vs raw)
+// so that equal keys stored in different encodings compare equal. It never
+// skips the comparison and never causes a genuinely different key to match —
+// a wrong key decodes to different bytes and is still rejected.
+func normalizePublicKey(b []byte) []byte {
+	if len(b) == ed25519RawPublicKeySize {
+		return b
+	}
+	if decoded, err := hex.DecodeString(string(b)); err == nil && len(decoded) == ed25519RawPublicKeySize {
+		return decoded
+	}
+	return b
+}
 
 // DefaultMembershipWhitelistPrefix is the Consul key prefix for membership whitelist.
 const DefaultMembershipWhitelistPrefix = "mpc_eligibility/membership_whitelist/"
@@ -73,22 +98,47 @@ func NewWhitelistMembershipVerifier(source, path string, consulClient *api.Clien
 
 // VerifyMembership checks if a node is allowed to join the network.
 func (v *WhitelistMembershipVerifier) VerifyMembership(nodeID string, pubKey []byte, metadata map[string]string) error {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
-	peer, exists := v.allowedNodes[nodeID]
+	peer, exists := v.lookup(nodeID)
 	if !exists {
-		return fmt.Errorf("%w: nodeID %s not found in whitelist", ErrNotInWhitelist, nodeID)
+		// AICW-FORK FIX: the whitelist is loaded once at construction, but peers
+		// can be added to Consul at runtime (a node joins after this node
+		// started). On a miss, refresh from the source once and retry so a
+		// newly-whitelisted node is recognized. This does NOT weaken the check:
+		// a node that is genuinely absent from the whitelist stays rejected, and
+		// the public-key comparison below is still enforced for nodes that are
+		// present.
+		if err := v.Refresh(); err != nil {
+			return fmt.Errorf("%w: nodeID %s not found in whitelist (refresh failed: %v)", ErrNotInWhitelist, nodeID, err)
+		}
+		peer, exists = v.lookup(nodeID)
+		if !exists {
+			return fmt.Errorf("%w: nodeID %s not found in whitelist", ErrNotInWhitelist, nodeID)
+		}
 	}
 
-	// Verify pubkey matches if provided and stored
+	// Verify pubkey matches if provided and stored.
+	//
+	// AICW-FORK FIX (P0): compare canonical 32-byte raw keys with bytes.Equal.
+	// Both sides are normalized to raw form so a representation difference
+	// (hex string vs raw bytes) can never cause a false mismatch — while a
+	// genuinely different key is still rejected. Verification is NOT skipped:
+	// if the whitelist entry carries a public key, the joining node must
+	// present the exact same key.
 	if len(pubKey) > 0 && len(peer.PublicKey) > 0 {
-		if string(pubKey) != string(peer.PublicKey) {
+		if !bytes.Equal(normalizePublicKey(pubKey), normalizePublicKey(peer.PublicKey)) {
 			return fmt.Errorf("%w: public key mismatch for nodeID %s", ErrVerificationFailed, nodeID)
 		}
 	}
 
 	return nil
+}
+
+// lookup returns the whitelist entry for nodeID under a read lock.
+func (v *WhitelistMembershipVerifier) lookup(nodeID string) (PeerInfo, bool) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	peer, exists := v.allowedNodes[nodeID]
+	return peer, exists
 }
 
 // Refresh reloads the membership whitelist from the configured source.
@@ -117,24 +167,54 @@ func (v *WhitelistMembershipVerifier) loadFromConsul() error {
 		return fmt.Errorf("eligibility: failed to list consul keys: %w", err)
 	}
 
+	// membershipEntry mirrors the operator CLI's on-disk JSON format
+	// (cmd/operator add-member / MembershipEntry), where public_key is a
+	// hex-encoded string. We decode that hex into raw bytes so it matches the
+	// node's raw Ed25519 identity key.
+	type membershipEntry struct {
+		NodeID    string            `json:"node_id"`
+		PublicKey string            `json:"public_key"`
+		Metadata  map[string]string `json:"metadata,omitempty"`
+	}
+
 	newNodes := make(map[string]PeerInfo)
 	for _, pair := range pairs {
-		var peer PeerInfo
-		if err := json.Unmarshal(pair.Value, &peer); err != nil {
-			// Attempt simple format: key is nodeID, value is pubkey
-			nodeID := pair.Key[len(v.consulPrefix):]
-			peer = PeerInfo{
-				NodeID:    nodeID,
-				PublicKey: pair.Value,
+		nodeID := pair.Key[len(v.consulPrefix):]
+
+		var entry membershipEntry
+		if err := json.Unmarshal(pair.Value, &entry); err != nil {
+			// AICW-FORK FIX (P0): do NOT fall back to storing the raw JSON
+			// bytes as the public key. That old fallback poisoned PublicKey
+			// with the full ~133-byte JSON blob, so every VerifyMembership
+			// comparison against a node's 32-byte raw key failed.
+			// A malformed entry is skipped (fail-closed) so an unverifiable
+			// node simply never enters the whitelist and is rejected.
+			fmt.Printf("warning: eligibility: skipping malformed whitelist entry for %q: %v\n", nodeID, err)
+			continue
+		}
+
+		if entry.NodeID != "" {
+			nodeID = entry.NodeID
+		}
+
+		info := PeerInfo{
+			NodeID:   nodeID,
+			Metadata: entry.Metadata,
+		}
+
+		// AICW-FORK FIX (P0): hex-decode the public key into 32-byte raw form.
+		// Invalid hex is fail-closed (entry skipped) rather than stored as a
+		// poisoned value.
+		if entry.PublicKey != "" {
+			raw, decErr := hex.DecodeString(entry.PublicKey)
+			if decErr != nil {
+				fmt.Printf("warning: eligibility: skipping whitelist entry %q with invalid hex public key: %v\n", nodeID, decErr)
+				continue
 			}
+			info.PublicKey = raw
 		}
 
-		if peer.NodeID == "" {
-			// Extract nodeID from key
-			peer.NodeID = pair.Key[len(v.consulPrefix):]
-		}
-
-		newNodes[peer.NodeID] = peer
+		newNodes[nodeID] = info
 	}
 
 	v.allowedNodes = newNodes

@@ -5,6 +5,7 @@
 package mpc
 
 import (
+	"bytes"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -153,16 +154,28 @@ func (r *DynamicRegistry) AddPeer(nodeID string, publicKey []byte) error {
 		return fmt.Errorf("peer already registered: %s", nodeID)
 	}
 
-	// Verify membership if verifier is set
+	// Verify membership if verifier is set.
+	// This is the authoritative security gate for joining the registry: an
+	// unverified or mismatched key is rejected here regardless of what the
+	// identity store already holds.
 	if r.membershipVerifier != nil {
 		if err := r.membershipVerifier.VerifyMembership(nodeID, publicKey, nil); err != nil {
 			return fmt.Errorf("peer membership verification failed: %w", err)
 		}
 	}
 
-	// Register public key in identity store
-	if err := r.identityStore.RegisterPeerPublicKey(nodeID, publicKey); err != nil {
-		return fmt.Errorf("failed to register peer public key: %w", err)
+	// Register public key in identity store (idempotent).
+	//
+	// AICW-FORK FIX (P0): peers preloaded via LoadPeersFromConsul() are already
+	// present in the store with the same raw key. Re-registering would run the
+	// store's membership verification a second time and overwrite an identical
+	// value for no reason. If the store already holds the exact same key, we
+	// add the peer to the registry only. Membership has already been verified
+	// above, so this does not weaken the security check.
+	if existing, err := r.identityStore.GetPublicKey(nodeID); err != nil || !bytes.Equal(existing, publicKey) {
+		if err := r.identityStore.RegisterPeerPublicKey(nodeID, publicKey); err != nil {
+			return fmt.Errorf("failed to register peer public key: %w", err)
+		}
 	}
 
 	// Add to peer list
@@ -467,14 +480,53 @@ func (r *DynamicRegistry) updateReadyState() {
 	}
 
 	totalPeers := len(r.peerNodeIDs)
+
+	// AICW-FORK FIX (P1): avoid the vacuous-truth bug. With no known peers,
+	// readyCount == totalPeers is 0 == 0 == true, which previously made a
+	// solo node believe the whole cluster was ready. A node with zero peers
+	// is never "all peers ready".
+	if totalPeers == 0 {
+		r.ready = false
+		return
+	}
+
 	r.ready = readyCount == totalPeers
 }
 
-// ArePeersReady returns true if all known peers are ready.
+// ArePeersReady reports whether the cluster is ready to start an MPC keygen.
+//
+// AICW-FORK FIX (P1): This is the gate the KeygenConsumer polls before it
+// begins consuming keygen messages. It must return true ONLY when a real
+// multi-party quorum exists, otherwise a lone node starts a solo (1-party)
+// keygen while the Bridge reports a misleading HTTP 200 ("success-looking
+// failure"). The gate therefore requires all of:
+//
+//  1. At least one known peer (no vacuous truth on an empty peer set).
+//  2. Total participants including self >= mpcThreshold+1 (t+1 quorum floor).
+//  3. Every known peer is currently ready (r.ready — full participation).
+//  4. Ready participants including self >= mpcThreshold+1.
+//
+// These conditions only make the gate stricter; a correctly-formed cluster
+// still passes and a solo node is correctly held back.
 func (r *DynamicRegistry) ArePeersReady() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.ready
+
+	if len(r.peerNodeIDs) == 0 {
+		return false
+	}
+
+	totalParticipants := int64(len(r.peerNodeIDs)) + 1 // include self
+	if totalParticipants < int64(r.mpcThreshold+1) {
+		return false
+	}
+
+	if !r.ready {
+		return false
+	}
+
+	readyParticipants := atomic.LoadInt64(&r.readyCount) // self + ready peers
+	return readyParticipants >= int64(r.mpcThreshold+1)
 }
 
 // AreMajorityReady returns true if majority peers are ready.
