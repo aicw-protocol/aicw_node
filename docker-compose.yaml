@@ -1,141 +1,68 @@
-# AICW MPC Node Network - Docker Compose
+# Optional Docker path for node operators (Go install not required).
+# Infrastructure (Consul + NATS) + one example node container.
 #
-# AICW-FORK: Test environment for Phase A dynamic peer network.
-#
-# This sets up:
-# - 3 MPC nodes (node1, node2, node3)
-# - Consul for service discovery and KV store
-# - NATS for messaging
+# Prerequisites:
+#   1. Run `aicw-node init --name mynode` on the host (or mount pre-built identity/)
+#   2. Copy config/network-config.yaml.template → config/network-config.yaml
+#   3. Create config/password.txt with your node password
 #
 # Usage:
-#   docker-compose up -d
-#   docker-compose logs -f node1
-
-version: '3.8'
+#   docker compose up -d
+#
+# Pull pre-built image (when published):
+#   docker pull ghcr.io/aicw-protocol/aicw-node:latest
 
 services:
-  # Consul - Service Discovery & KV Store
   consul:
-    image: hashicorp/consul:1.18
-    container_name: mpc-consul
-    command: agent -dev -client=0.0.0.0
+    image: hashicorp/consul:1.20
+    command: agent -dev --client=0.0.0.0 -ui
     ports:
       - "8500:8500"
-      - "8600:8600/udp"
-    environment:
-      CONSUL_BIND_INTERFACE: eth0
-    networks:
-      - mpc-network
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
-  # NATS - Messaging
   nats:
     image: nats:2.10-alpine
-    container_name: mpc-nats
-    command: 
-      - "--jetstream"
-      - "--store_dir=/data"
+    command: ["-js", "-m", "8222"]
     ports:
       - "4222:4222"
-      - "8222:8222"  # HTTP monitoring
-    volumes:
-      - nats-data:/data
-    networks:
-      - mpc-network
-
-  # MPC Node 1
-  node1:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: mpc-node1
-    environment:
-      NODE_NAME: node1
-      CONSUL_HTTP_ADDR: consul:8500
-      NATS_URL: nats://nats:4222
-      MPC_THRESHOLD: "1"
-      ELIGIBILITY_INITIATOR_MODE: whitelist
-      ELIGIBILITY_MEMBERSHIP_MODE: whitelist
-      ELIGIBILITY_WHITELIST_SOURCE: consul
-    volumes:
-      - ./identity/node1:/app/identity
-      - ./config:/app/config:ro
-    depends_on:
-      - consul
-      - nats
-    networks:
-      - mpc-network
+      - "8222:8222"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
-  # MPC Node 2
-  node2:
+  aicw-node:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: mpc-node2
-    environment:
-      NODE_NAME: node2
-      CONSUL_HTTP_ADDR: consul:8500
-      NATS_URL: nats://nats:4222
-      MPC_THRESHOLD: "1"
-      ELIGIBILITY_INITIATOR_MODE: whitelist
-      ELIGIBILITY_MEMBERSHIP_MODE: whitelist
-      ELIGIBILITY_WHITELIST_SOURCE: consul
+      additional_contexts:
+        mpcium: ../mpcium
+    image: ghcr.io/aicw-protocol/aicw-node:latest
+    depends_on:
+      consul:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
     volumes:
-      - ./identity/node2:/app/identity
-      - ./config:/app/config:ro
-    depends_on:
-      - consul
-      - nats
-    networks:
-      - mpc-network
-
-  # MPC Node 3
-  node3:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: mpc-node3
-    environment:
-      NODE_NAME: node3
-      CONSUL_HTTP_ADDR: consul:8500
-      NATS_URL: nats://nats:4222
-      MPC_THRESHOLD: "1"
-      ELIGIBILITY_INITIATOR_MODE: whitelist
-      ELIGIBILITY_MEMBERSHIP_MODE: whitelist
-      ELIGIBILITY_WHITELIST_SOURCE: consul
-    volumes:
-      - ./identity/node3:/app/identity
-      - ./config:/app/config:ro
-    depends_on:
-      - consul
-      - nats
-    networks:
-      - mpc-network
-
-  # Operator CLI - For managing whitelists
-  # SECURITY WARNING: This container has write access to whitelists.
-  # In production, this should be secured with proper authentication.
-  operator:
-    build:
-      context: .
-      dockerfile: Dockerfile.operator
-    container_name: mpc-operator
-    environment:
-      CONSUL_HTTP_ADDR: consul:8500
-    depends_on:
-      - consul
-    networks:
-      - mpc-network
-    # Keep container running for manual operations
-    command: ["tail", "-f", "/dev/null"]
-
-networks:
-  mpc-network:
-    driver: bridge
-
-volumes:
-  nats-data:
+      - ./identity:/app/identity:ro
+      - ./config/network-config.yaml:/app/config/network-config.yaml:ro
+      - ./config/password.txt:/app/config/password.txt:ro
+    # Change the node name with: NODE_NAME=alice docker compose up -d
+    # (or set NODE_NAME=alice in a .env file next to this compose file).
+    # Logs go to stdout only — view them with `docker compose logs -f`.
+    command:
+      - start
+      - --network-config
+      - /app/config/network-config.yaml
+      - --name
+      - ${NODE_NAME:-mynode}
+      - --password-file
+      - /app/config/password.txt
+      - --identity-dir
+      - /app/identity
+    restart: unless-stopped

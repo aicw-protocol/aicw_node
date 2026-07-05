@@ -13,8 +13,6 @@ package main
 
 import (
 	"context"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -44,6 +42,7 @@ import (
 	mpciumpc "github.com/fystack/mpcium/pkg/mpc"
 
 	// AICW dynamic packages
+	aicwconfig "github.com/aicw/aicw_node/pkg/config"
 	"github.com/aicw/aicw_node/pkg/eligibility"
 	"github.com/aicw/aicw_node/pkg/identity"
 	"github.com/aicw/aicw_node/pkg/mpc"
@@ -78,6 +77,31 @@ func main() {
 		Version: Version,
 		Commands: []*cli.Command{
 			{
+				Name:  "init",
+				Usage: "Generate node identity (UUID + Ed25519 keypair) in one step",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:     "name",
+						Aliases:  []string{"n"},
+						Usage:    "Node name (used for identity file names)",
+						Required: true,
+					},
+					&cli.StringFlag{
+						Name:    "output-dir",
+						Aliases: []string{"o"},
+						Usage:   "Directory for identity files",
+						Value:   "identity",
+					},
+					&cli.BoolFlag{
+						Name:    "overwrite",
+						Aliases: []string{"f"},
+						Usage:   "Overwrite existing identity files",
+						Value:   false,
+					},
+				},
+				Action: runInit,
+			},
+			{
 				Name:  "start",
 				Usage: "Start an AICW MPC node with dynamic peer management",
 				Flags: []cli.Flag{
@@ -88,9 +112,20 @@ func main() {
 						Required: true,
 					},
 					&cli.StringFlag{
+						Name:    "network-config",
+						Aliases: []string{"N"},
+						Usage:   "Network-wide config (chain_code, initiator pubkey, NATS, Consul, threshold)",
+					},
+					&cli.StringFlag{
 						Name:    "config",
 						Aliases: []string{"c"},
-						Usage:   "Path to configuration file",
+						Usage:   "Operator-local config merged on top of network-config (or standalone legacy config.yaml)",
+					},
+					&cli.StringFlag{
+						Name:    "identity-dir",
+						Aliases: []string{"i"},
+						Usage:   "Directory containing identity files",
+						Value:   "identity",
 					},
 					&cli.StringFlag{
 						Name:    "password-file",
@@ -129,13 +164,21 @@ func main() {
 
 func runNode(ctx context.Context, c *cli.Command) error {
 	nodeName := c.String("name")
+	identityDir := c.String("identity-dir")
+	networkConfigPath := c.String("network-config")
 	configPath := c.String("config")
 	passwordFile := c.String("password-file")
 	agePasswordFile := c.String("identity-password-file")
 	debug := c.Bool("debug")
 
 	viper.SetDefault("backup_enabled", true)
-	config.InitViperConfig(configPath)
+	if networkConfigPath != "" {
+		if err := aicwconfig.InitViperConfigMerged(networkConfigPath, configPath); err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+	} else {
+		aicwconfig.InitViperConfigSingle(configPath)
+	}
 	environment := viper.GetString("environment")
 	logger.Init(environment, debug)
 
@@ -156,11 +199,11 @@ func runNode(ctx context.Context, c *cli.Command) error {
 
 	// === AICW-FORK: Load self identity and generate nodeID ===
 	// Unlike original, we don't load peers.json - peers are discovered from Consul
-	nodeID, privateKey, err := loadSelfIdentity(nodeName, agePasswordFile)
+	nodeID, privateKey, err := loadSelfIdentity(identityDir, nodeName, agePasswordFile)
 	if err != nil {
 		logger.Fatal("Failed to load self identity", err)
 	}
-	logger.Info("Loaded self identity", "nodeID", nodeID, "nodeName", nodeName)
+	logger.Info("Loaded self identity", "nodeID", nodeID, "nodeName", nodeName, "identityDir", identityDir)
 
 	// === Original: BadgerKV (unchanged) ===
 	badgerKV := newBadgerKV(nodeName, nodeID, appConfig)
@@ -174,7 +217,7 @@ func runNode(ctx context.Context, c *cli.Command) error {
 
 	// === AICW-FORK: Create DynamicFileStore instead of NewFileStore ===
 	// Key difference: only loads self identity, peers are loaded from Consul dynamically
-	dynamicStore, err := identity.NewDynamicFileStore("identity", nodeName, privateKey, consulClient)
+	dynamicStore, err := identity.NewDynamicFileStore(identityDir, nodeName, privateKey, consulClient)
 	if err != nil {
 		logger.Fatal("Failed to create dynamic identity store", err)
 	}
@@ -436,70 +479,6 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	}
 
 	return nil
-}
-
-// loadSelfIdentity loads the node's identity file and returns nodeID and private key.
-// Unlike original mpcium, this doesn't require peers.json - nodeID comes from identity file.
-func loadSelfIdentity(nodeName, agePasswordFile string) (string, []byte, error) {
-	identityPath := filepath.Join("identity", nodeName+"_identity.json")
-
-	// Check if identity file exists
-	if _, err := os.Stat(identityPath); os.IsNotExist(err) {
-		return "", nil, fmt.Errorf("identity file not found: %s", identityPath)
-	}
-
-	// Read identity file to get nodeID
-	data, err := os.ReadFile(identityPath)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to read identity file: %w", err)
-	}
-
-	// Parse identity to get nodeID
-	var identityData struct {
-		NodeID    string `json:"node_id"`
-		NodeName  string `json:"node_name"`
-		PublicKey string `json:"public_key"`
-	}
-	if err := parseJSON(data, &identityData); err != nil {
-		return "", nil, fmt.Errorf("failed to parse identity file: %w", err)
-	}
-
-	nodeID := identityData.NodeID
-	if nodeID == "" {
-		return "", nil, fmt.Errorf("node_id is empty in identity file")
-	}
-
-	// Load private key
-	privateKeyPath := filepath.Join("identity", nodeName+"_private_key.txt")
-
-	// Check for encrypted key file first
-	encryptedKeyPath := privateKeyPath + ".age"
-	if _, err := os.Stat(encryptedKeyPath); err == nil {
-		// Encrypted key exists - need password
-		if agePasswordFile == "" {
-			return "", nil, fmt.Errorf("encrypted private key found but no password file provided")
-		}
-		// TODO: Implement age decryption if needed
-		return "", nil, fmt.Errorf("encrypted private key not yet supported in AICW node")
-	}
-
-	// Load plaintext private key
-	privateKeyHex, err := os.ReadFile(privateKeyPath)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to read private key file: %w", err)
-	}
-
-	privateKey, err := hex.DecodeString(strings.TrimSpace(string(privateKeyHex)))
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to decode private key: %w", err)
-	}
-
-	return nodeID, privateKey, nil
-}
-
-// parseJSON is a simple JSON parser
-func parseJSON(data []byte, v interface{}) error {
-	return json.Unmarshal(data, v)
 }
 
 // createMembershipVerifier creates the appropriate verifier based on config.

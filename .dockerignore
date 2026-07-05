@@ -1,0 +1,55 @@
+# Git
+.git/
+.gitignore
+
+# Local test harness (logs, identities, badger DBs, binaries)
+test-local/
+
+# Internal findings / design notes (not needed to compile)
+findings/
+docs/
+begin.md
+
+# Build artifacts
+*.exe
+*.exe~
+/aicw-node
+/operator
+/mpc-bridge
+/mpcium-node
+/dist/
+
+# Runtime / local data
+**/backups/
+**/*.db
+**/badger/
+**/db/
+logs/
+**/logs/
+# Runtime identity mount dir (repo root only — not pkg/identity source)
+/identity/
+test-local/**/identity/
+
+# Secrets (never ship into image context)
+**/password.txt
+**/*_private_key.txt
+**/*_private.key
+**/*_private.key.age
+*.key
+*.age
+
+# Docker compose runtime mounts (not source)
+docker-compose.yaml
+docker-compose.*.yaml
+**/docker-compose.yaml
+
+# CI / editor / OS
+.github/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+dev/
+
+# Go vendor (rebuilt via go mod download in Dockerfile)
+vendor/

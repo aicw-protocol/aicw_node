@@ -83,7 +83,7 @@ func TestLoadSelfIdentity_readsPrivateKeyFromFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	nodeID, loadedPriv, err := loadSelfIdentity(nodeName, "")
+	nodeID, loadedPriv, err := loadSelfIdentity(identityDir, nodeName, "")
 	if err != nil {
 		t.Fatalf("loadSelfIdentity: %v", err)
 	}

@@ -1,0 +1,27 @@
+# Network-wide settings (distributed by the network administrator).
+# Copy to network-config.yaml and fill in values from the admin.
+#
+# Start a node with only this file + operator settings:
+#   aicw-node start --network-config network-config.yaml --name mynode -f password.txt
+#
+# Operator-specific settings (name, password path) go in operator-config.yaml
+# or are passed via CLI flags (--name, -f).
+
+environment: development
+event_initiator_algorithm: ed25519
+chain_code: "REPLACE_WITH_CHAIN_CODE"
+event_initiator_pubkey: "REPLACE_WITH_INITIATOR_PUBKEY_HEX"
+
+nats:
+  url: "nats://127.0.0.1:4222"
+
+consul:
+  address: "127.0.0.1:8500"
+
+mpc_threshold: 2
+
+eligibility:
+  membership:
+    mode: whitelist
+    source: consul
+    consul_path: mpc_eligibility/membership_whitelist/

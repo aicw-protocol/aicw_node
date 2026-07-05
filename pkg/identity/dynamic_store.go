@@ -368,6 +368,39 @@ func (s *DynamicFileStore) SetMembershipVerifier(verifier eligibility.Membership
 	s.membershipVerifier = verifier
 }
 
+// IsSelfMember reports whether THIS node is a verified member of the network.
+//
+// AICW-FORK (DoS fix): the mpcium event consumer calls this (via an anonymous
+// interface type-assertion) at the top of handleKeyGenEvent / handleSigningEvent
+// and skips the ceremony silently when it returns false. This prevents a node
+// that is NOT a legitimate member — e.g. one whitelisted with the wrong public
+// key — from participating in a ceremony and, crucially, from publishing an
+// error to the result topic that could race and fail a healthy 3-party
+// ceremony (availability / DoS attack).
+//
+// It checks ONLY this node against the same membership verifier used for peers;
+// it does not touch or weaken the per-peer verification. A wrong-key node fails
+// its own self-check and stays out.
+//
+// Reflection #2 — do NOT falsely reject a legitimate node: the check delegates
+// to membershipVerifier.VerifyMembership, which already performs the v4
+// refresh-on-miss retry (reload the whitelist from Consul once and re-check on a
+// lookup miss). So a legitimate node that was whitelisted at runtime becomes a
+// member as soon as the whitelist is refreshed, and IsSelfMember returns true.
+//
+// If no verifier is configured, this returns true for backward compatibility
+// (matches the peer-registration path, which also no-ops without a verifier).
+func (s *DynamicFileStore) IsSelfMember() bool {
+	if s.membershipVerifier == nil {
+		return true
+	}
+	if err := s.membershipVerifier.VerifyMembership(s.selfNodeID, s.selfPubKey, nil); err != nil {
+		fmt.Printf("warning: identity: self membership check failed for %q: %v\n", s.selfNodeID, err)
+		return false
+	}
+	return true
+}
+
 // LoadPeersFromConsul loads peer public keys from Consul.
 func (s *DynamicFileStore) LoadPeersFromConsul() error {
 	if s.consulClient == nil {
