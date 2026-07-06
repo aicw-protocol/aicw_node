@@ -210,7 +210,7 @@ and **Git**.
 
 ```
 git clone https://github.com/aicw-protocol/aicw_node.git
-git clone <the-aicw-mpcium-fork-url> mpcium   # must sit next to aicw_node/
+git clone https://github.com/aicw-protocol/mpcium mpcium   # must sit next to aicw_node/
 cd aicw_node
 go build -o aicw-node ./cmd/aicw-node
 ```
