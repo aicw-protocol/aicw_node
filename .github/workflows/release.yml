@@ -32,12 +32,22 @@ jobs:
             suffix: darwin-arm64
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: aicw_node
+
+      # go.mod: replace github.com/fystack/mpcium => ../mpcium
+      # Layout: $GITHUB_WORKSPACE/{aicw_node,mpcium} as siblings.
+      - uses: actions/checkout@v4
+        with:
+          repository: aicw-protocol/mpcium
+          path: mpcium
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: aicw_node/go.mod
 
       - name: Build aicw-node
+        working-directory: aicw_node
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -52,7 +62,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aicw-node-${{ matrix.suffix }}
-          path: dist/aicw-node-${{ matrix.suffix }}${{ matrix.ext }}
+          path: aicw_node/dist/aicw-node-${{ matrix.suffix }}${{ matrix.ext }}
 
   release:
     needs: build
