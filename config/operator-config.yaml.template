@@ -20,3 +20,10 @@ max_concurrent_signing: 10
 healthcheck:
   enabled: false
   address: "0.0.0.0:8080"
+
+# Optional: report liveness to the AICW node web registry (referral selection).
+# Ping failures do not affect MPC signing.
+node_web:
+  ping_enabled: false
+  url: ""
+  ping_interval_seconds: 90

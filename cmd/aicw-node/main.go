@@ -46,6 +46,7 @@ import (
 	"github.com/aicw/aicw_node/pkg/eligibility"
 	"github.com/aicw/aicw_node/pkg/identity"
 	"github.com/aicw/aicw_node/pkg/mpc"
+	"github.com/aicw/aicw_node/pkg/nodeweb"
 )
 
 const (
@@ -172,6 +173,8 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	debug := c.Bool("debug")
 
 	viper.SetDefault("backup_enabled", true)
+	viper.SetDefault("node_web.ping_enabled", false)
+	viper.SetDefault("node_web.ping_interval_seconds", 90)
 	if networkConfigPath != "" {
 		if err := aicwconfig.InitViperConfigMerged(networkConfigPath, configPath); err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
@@ -394,6 +397,13 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	// === Original: Signal handling (unchanged) ===
 	logger.Info("Starting consumers", "nodeID", nodeID)
 	appContext, cancel := context.WithCancel(context.Background())
+
+	stopNodeWebPing := nodeweb.StartPeriodicPing(appContext, nodeID, nodeweb.Config{
+		Enabled:         viper.GetBool("node_web.ping_enabled"),
+		BaseURL:         viper.GetString("node_web.url"),
+		IntervalSeconds: viper.GetInt("node_web.ping_interval_seconds"),
+	})
+	defer stopNodeWebPing()
 
 	go func() {
 		sigChan := make(chan os.Signal, 1)
