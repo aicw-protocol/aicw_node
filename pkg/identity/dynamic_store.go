@@ -96,8 +96,10 @@ type DynamicFileStore struct {
 
 	// === Fields for original mpcium compatibility ===
 
-	// initiatorKey holds the trusted initiator's public key for message verification
-	initiatorKey *InitiatorKey
+	// initiatorKeys holds trusted initiator public keys for message verification.
+	// Index 0 is always event_initiator_pubkey (Bridge); an optional second entry
+	// is reshare_initiator_pubkey (orchestrator).
+	initiatorKeys []*InitiatorKey
 
 	// authConfig holds authorization configuration
 	authConfig AuthorizationConfig
@@ -133,11 +135,11 @@ func NewDynamicFileStore(identityDir, nodeName string, privateKey []byte, consul
 		return nil, fmt.Errorf("failed to decode self public key: %w", err)
 	}
 
-	// Load initiator key from config (for VerifyInitiatorMessage)
-	initiatorKey, err := loadInitiatorKey()
+	// Load initiator keys from config (for VerifyInitiatorMessage)
+	initiatorKeys, err := loadInitiatorKeys()
 	if err != nil {
 		// Warning only - not all deployments need initiator verification
-		fmt.Printf("warning: failed to load initiator key: %v\n", err)
+		fmt.Printf("warning: failed to load initiator keys: %v\n", err)
 	}
 
 	store := &DynamicFileStore{
@@ -149,7 +151,7 @@ func NewDynamicFileStore(identityDir, nodeName string, privateKey []byte, consul
 		symmetricKeys:        make(map[string][]byte),
 		consulClient:         consulClient,
 		watchStopCh:          make(chan struct{}),
-		initiatorKey:         initiatorKey,
+		initiatorKeys:        initiatorKeys,
 		cachedAuthorizerKeys: make(map[AuthorizerID]any),
 	}
 
@@ -169,18 +171,49 @@ func NewDynamicFileStore(identityDir, nodeName string, privateKey []byte, consul
 	return store, nil
 }
 
-// loadInitiatorKey loads the trusted initiator public key from config.
-func loadInitiatorKey() (*InitiatorKey, error) {
-	algorithm := viper.GetString("event_initiator_algorithm")
-	if algorithm == "" {
-		algorithm = string(mpciumtypes.EventInitiatorKeyTypeEd25519)
+// loadInitiatorKeys loads Bridge + optional reshare initiator public keys from config.
+func loadInitiatorKeys() ([]*InitiatorKey, error) {
+	defaultAlgorithm := viper.GetString("event_initiator_algorithm")
+	if defaultAlgorithm == "" {
+		defaultAlgorithm = string(mpciumtypes.EventInitiatorKeyTypeEd25519)
 	}
 
-	pubKeyHex := viper.GetString("event_initiator_pubkey")
-	if pubKeyHex == "" {
+	bridgePubHex := strings.TrimSpace(viper.GetString("event_initiator_pubkey"))
+	if bridgePubHex == "" {
 		return nil, fmt.Errorf("event_initiator_pubkey not configured")
 	}
 
+	bridgeKey, err := parseInitiatorKey(bridgePubHex, defaultAlgorithm)
+	if err != nil {
+		return nil, fmt.Errorf("event_initiator_pubkey: %w", err)
+	}
+
+	keys := []*InitiatorKey{bridgeKey}
+
+	resharePubHex := strings.TrimSpace(viper.GetString("reshare_initiator_pubkey"))
+	if resharePubHex == "" {
+		return keys, nil
+	}
+
+	if strings.EqualFold(bridgePubHex, resharePubHex) {
+		return nil, fmt.Errorf("reshare_initiator_pubkey must differ from event_initiator_pubkey")
+	}
+
+	reshareAlgorithm := viper.GetString("reshare_initiator_algorithm")
+	if reshareAlgorithm == "" {
+		reshareAlgorithm = defaultAlgorithm
+	}
+
+	reshareKey, err := parseInitiatorKey(resharePubHex, reshareAlgorithm)
+	if err != nil {
+		return nil, fmt.Errorf("reshare_initiator_pubkey: %w", err)
+	}
+
+	keys = append(keys, reshareKey)
+	return keys, nil
+}
+
+func parseInitiatorKey(pubKeyHex, algorithm string) (*InitiatorKey, error) {
 	switch algorithm {
 	case string(mpciumtypes.EventInitiatorKeyTypeEd25519):
 		key, err := mpciumenc.ParseEd25519PublicKeyFromHex(pubKeyHex)
@@ -195,7 +228,6 @@ func loadInitiatorKey() (*InitiatorKey, error) {
 	case string(mpciumtypes.EventInitiatorKeyTypeP256):
 		key, err := mpciumenc.ParseP256PublicKeyFromHex(pubKeyHex)
 		if err != nil {
-			// Try base64 as fallback
 			key, err = mpciumenc.ParseP256PublicKeyFromBase64(pubKeyHex)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse P256 initiator key: %w", err)
@@ -700,20 +732,34 @@ func (s *DynamicFileStore) DecryptMessage(cipher []byte, peerID string) ([]byte,
 // VerifyInitiatorMessage verifies the signature of an initiator message.
 // Ported from mpcium/pkg/identity/identity.go:567-577
 func (s *DynamicFileStore) VerifyInitiatorMessage(msg mpciumtypes.InitiatorMessage) error {
-	if s.initiatorKey == nil {
+	if len(s.initiatorKeys) == 0 {
 		return fmt.Errorf("initiator key not configured")
 	}
 
-	switch s.initiatorKey.Algorithm {
-	case mpciumtypes.EventInitiatorKeyTypeEd25519:
-		return s.verifyInitiatorEd25519(msg)
-	case mpciumtypes.EventInitiatorKeyTypeP256:
-		return s.verifyInitiatorP256(msg)
+	var lastErr error
+	for _, key := range s.initiatorKeys {
+		var err error
+		switch key.Algorithm {
+		case mpciumtypes.EventInitiatorKeyTypeEd25519:
+			err = verifyInitiatorEd25519(msg, key)
+		case mpciumtypes.EventInitiatorKeyTypeP256:
+			err = verifyInitiatorP256(msg, key)
+		default:
+			err = fmt.Errorf("unsupported algorithm: %s", key.Algorithm)
+		}
+		if err == nil {
+			return nil
+		}
+		lastErr = err
 	}
-	return fmt.Errorf("unsupported algorithm: %s", s.initiatorKey.Algorithm)
+
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("invalid signature from initiator")
 }
 
-func (s *DynamicFileStore) verifyInitiatorEd25519(msg mpciumtypes.InitiatorMessage) error {
+func verifyInitiatorEd25519(msg mpciumtypes.InitiatorMessage, key *InitiatorKey) error {
 	msgBytes, err := msg.Raw()
 	if err != nil {
 		return fmt.Errorf("failed to get raw message data: %w", err)
@@ -723,24 +769,24 @@ func (s *DynamicFileStore) verifyInitiatorEd25519(msg mpciumtypes.InitiatorMessa
 		return errors.New("signature is empty")
 	}
 
-	if !ed25519.Verify(s.initiatorKey.Ed25519, msgBytes, signature) {
+	if !ed25519.Verify(key.Ed25519, msgBytes, signature) {
 		return fmt.Errorf("invalid signature from initiator")
 	}
 	return nil
 }
 
-func (s *DynamicFileStore) verifyInitiatorP256(msg mpciumtypes.InitiatorMessage) error {
+func verifyInitiatorP256(msg mpciumtypes.InitiatorMessage, key *InitiatorKey) error {
 	msgBytes, err := msg.Raw()
 	if err != nil {
 		return fmt.Errorf("failed to get raw message data: %w", err)
 	}
 	signature := msg.Sig()
 
-	if s.initiatorKey.P256 == nil {
+	if key.P256 == nil {
 		return fmt.Errorf("initiator public key for P256 is not set")
 	}
 
-	return mpciumenc.VerifyP256Signature(s.initiatorKey.P256, msgBytes, signature)
+	return mpciumenc.VerifyP256Signature(key.P256, msgBytes, signature)
 }
 
 // AuthorizeInitiatorMessage checks authorization for an initiator message.

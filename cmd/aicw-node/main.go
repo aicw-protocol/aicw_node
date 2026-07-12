@@ -42,6 +42,7 @@ import (
 	mpciumpc "github.com/fystack/mpcium/pkg/mpc"
 
 	// AICW dynamic packages
+	"github.com/aicw/aicw_node/pkg/committee"
 	aicwconfig "github.com/aicw/aicw_node/pkg/config"
 	"github.com/aicw/aicw_node/pkg/eligibility"
 	"github.com/aicw/aicw_node/pkg/identity"
@@ -288,6 +289,27 @@ func runNode(ctx context.Context, c *cli.Command) error {
 
 	dynamicRegistry := mpc.NewDynamicRegistry(nodeID, mpcThreshold, consulClient, dynamicStore)
 	dynamicRegistry.SetMembershipVerifier(membershipVerifier)
+
+	// === AICW-FORK (P1, §13.5): committee-selection policy for keygen filter ===
+	// Defaults to the tier policy in §13.8 when no committee_policy is configured.
+	// The keygen party filter itself is gated by committee_policy.keygen_filter_enabled
+	// (default false), so this is inert until deliberately enabled network-wide.
+	if committeePolicy, err := committee.LoadPolicyFromViper(); err != nil {
+		logger.Warn("Failed to load committee policy; keygen committee filter disabled", "error", err)
+	} else {
+		dynamicRegistry.SetCommitteePolicy(committeePolicy)
+		logger.Info("Loaded committee policy",
+			"version", committeePolicy.Version,
+			"cap", committeePolicy.Cap,
+			"keygen_filter_enabled", committee.KeygenFilterEnabled(),
+		)
+	}
+
+	// AICW-FORK (§13.3/§13.8): committee-local ECDH gate wait budget. Only takes
+	// effect when the committee filter is enabled; defaults to 120s.
+	if secs := viper.GetInt("ecdh_gate.timeout_seconds"); secs > 0 {
+		dynamicRegistry.SetECDHGateTimeout(time.Duration(secs) * time.Second)
+	}
 
 	// === AICW-FORK: Create DynamicECDHSession and connect to registry ===
 	dynamicECDHSession := mpc.NewDynamicECDHSession(nodeID, dynamicStore)

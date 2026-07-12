@@ -11,6 +11,10 @@ environment: development
 event_initiator_algorithm: ed25519
 chain_code: "REPLACE_WITH_CHAIN_CODE"
 event_initiator_pubkey: "REPLACE_WITH_INITIATOR_PUBKEY_HEX"
+# Optional: reshare-orchestrator pubkey (auto_reshare_design.md §5F). Must differ
+# from event_initiator_pubkey. Required before auto/manual reshare from the
+# orchestrator's dedicated initiator key.
+reshare_initiator_pubkey: "REPLACE_WITH_RESHARE_INITIATOR_PUBKEY_HEX"
 
 nats:
   url: "nats://127.0.0.1:4222"
@@ -25,3 +29,41 @@ eligibility:
     mode: whitelist
     source: consul
     consul_path: mpc_eligibility/membership_whitelist/
+
+# --- Committee policy (auto_reshare_design.md §13.8) ------------------------
+# NETWORK-WIDE and IDENTICAL on every node. Committee selection is deterministic
+# and computed locally (the committee is NOT carried in the keygen/reshare
+# message), so any mismatch between nodes will break ceremonies. Keep this block
+# byte-for-byte identical across the whole network.
+#
+# keygen_filter_enabled: false (default) keeps legacy behavior (keygen uses ALL
+# ready peers). Turn it on network-wide ONLY after every node ships this policy,
+# to switch keygen to tier-sized committees (§13.5) and enable committee-local
+# ECDH. Flip it on ALL nodes in the same rollout — never partially.
+committee_policy:
+  version: "2"
+  cap: 7
+  mpc_threshold: 2
+  keygen_filter_enabled: false
+  tiers:
+    - max_active: 4
+      committee_size: 3
+      spare: 0
+    - max_active: 10
+      committee_size: 4
+      spare: 1
+    - max_active: 30
+      committee_size: 5
+      spare: 2
+    - max_active: 100
+      committee_size: 6
+      spare: 3
+    - max_active: 999999
+      committee_size: 7
+      spare: 4
+
+# Committee-local ECDH gate (§13.3). Only takes effect when keygen_filter_enabled
+# is true. timeout_seconds is how long a node waits for committee ECDH to
+# complete before returning ecdh_not_ready (Bridge surfaces HTTP 503).
+ecdh_gate:
+  timeout_seconds: 120

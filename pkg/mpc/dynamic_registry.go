@@ -7,12 +7,14 @@ package mpc
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/hashicorp/consul/api"
 
+	"github.com/aicw/aicw_node/pkg/committee"
 	"github.com/aicw/aicw_node/pkg/eligibility"
 	"github.com/aicw/aicw_node/pkg/identity"
 )
@@ -37,6 +39,28 @@ type DynamicPeerRegistry interface {
 	// ArePeersReady checks if enough peers are ready.
 	ArePeersReady() bool
 
+	// AreCeremonyReady reports whether every member of the given committee is
+	// Consul-ready AND has an established symmetric key with this node
+	// (committee-local ECDH gate). Used before a keygen/reshare/sign ceremony.
+	// AICW-FORK (P0-a, §13.3).
+	AreCeremonyReady(committee []string) bool
+
+	// EnsureCeremonyECDH scopes ECDH to the committee and (re)starts the
+	// broadcast so symmetric keys with all committee members are established.
+	// AICW-FORK (P0-a, §13.4).
+	EnsureCeremonyECDH(committee []string) error
+
+	// EnsureCeremonyReady is the committee-local ceremony gate (§13.3): it
+	// scopes/triggers ECDH for the committee and blocks until every member is
+	// ceremony-ready or the ECDH-gate timeout elapses. When the committee filter
+	// is disabled it falls back to the legacy full-cluster ArePeersReady() gate,
+	// so default behavior is unchanged. AICW-FORK (P0-a/P1, §13.3/§13.4).
+	EnsureCeremonyReady(committee []string) error
+
+	// CeremonyFilterEnabled reports whether committee-local ceremony mode is on
+	// (committee policy set AND keygen filter flag enabled). AICW-FORK (§13.5).
+	CeremonyFilterEnabled() bool
+
 	// AreMajorityReady checks if majority (> threshold) are ready.
 	AreMajorityReady() bool
 
@@ -45,6 +69,11 @@ type DynamicPeerRegistry interface {
 
 	// GetReadyPeersIncludeSelf returns list of ready peer IDs including self.
 	GetReadyPeersIncludeSelf() []string
+
+	// GetKeygenParty returns the keygen party (peer IDs including self) for a
+	// wallet: the deterministic committee when the filter is enabled, otherwise
+	// the full ready set. AICW-FORK (P1, §13.5).
+	GetKeygenParty(walletID string) []string
 
 	// GetAllPeerIDs returns all known peer IDs (ready or not).
 	GetAllPeerIDs() []string
@@ -109,7 +138,30 @@ type DynamicRegistry struct {
 
 	// AICW-FORK: ECDH periodic broadcast control
 	ecdhBroadcastStopCh chan struct{}
+
+	// AICW-FORK (P0-b, §1.7): tracks whether periodicECDHBroadcast is currently
+	// running (1) or has stopped after the grace period (0). Used to (a) restart
+	// the broadcast loop when a peer rejoins in steady state, and (b) distinguish
+	// a genuine post-grace rejoin from the initial startup exchange.
+	ecdhBroadcastRunning int32
+
+	// AICW-FORK (P1, §13.5): committee-selection policy for the keygen party
+	// filter. Set once at startup (before ready/watch goroutines run). nil or a
+	// disabled filter flag means keygen uses the full ready set (legacy behavior).
+	committeePolicy *committee.Policy
+
+	// AICW-FORK (§13.3): how long EnsureCeremonyReady blocks waiting for
+	// committee-local ECDH to complete before returning an ecdh_not_ready error.
+	ecdhGateTimeout time.Duration
+
+	// AICW-FORK (P0-b): last seen ready/ KV value per peer. Detects restart
+	// without Resign() (kill -9) where the ready key persists but the value
+	// changes on the next Ready() call.
+	readyEpoch map[string]string
 }
+
+// DefaultECDHGateTimeout is the committee ECDH-gate wait budget (§13.3, §13.8).
+const DefaultECDHGateTimeout = 120 * time.Second
 
 // NewDynamicRegistry creates a new dynamic peer registry.
 //
@@ -135,6 +187,8 @@ func NewDynamicRegistry(
 		identityStore:       identityStore,
 		watchStopCh:         make(chan struct{}),
 		ecdhBroadcastStopCh: make(chan struct{}),
+		ecdhGateTimeout:     DefaultECDHGateTimeout,
+		readyEpoch:          make(map[string]string),
 	}
 
 	return reg
@@ -151,7 +205,15 @@ func (r *DynamicRegistry) AddPeer(nodeID string, publicKey []byte) error {
 
 	// Check if already registered
 	if _, exists := r.peerNodeIDs[nodeID]; exists {
-		return fmt.Errorf("peer already registered: %s", nodeID)
+		// AICW-FORK (P0-b): peer is already in the registry (e.g. rejoin after
+		// Consul directory watch did not fire). Still trigger ECDH renegotiation
+		// so stale symmetric keys are flushed and keys are re-derived.
+		if r.ecdhSession != nil {
+			if err := r.ecdhSession.AddPeer(nodeID); err != nil {
+				fmt.Printf("warning: ECDH AddPeer on rejoin failed for %s: %v\n", nodeID, err)
+			}
+		}
+		return nil
 	}
 
 	// Verify membership if verifier is set.
@@ -288,13 +350,14 @@ func (r *DynamicRegistry) Ready() error {
 		// This ensures late-joining nodes receive our public key even if they
 		// missed our initial broadcast (NATS pub/sub message loss).
 		// The loop stops automatically when key exchange is complete.
-		go r.periodicECDHBroadcast()
+		r.ensurePeriodicECDHBroadcast()
 	}
 
 	key := fmt.Sprintf("ready/%s", r.nodeID)
+	epoch := strconv.FormatInt(time.Now().UnixNano(), 10)
 	_, err := r.consulClient.KV().Put(&api.KVPair{
 		Key:   key,
-		Value: []byte("true"),
+		Value: []byte(epoch),
 	}, nil)
 
 	if err != nil {
@@ -311,6 +374,23 @@ func (r *DynamicRegistry) Ready() error {
 // appears complete, to ensure late-joining nodes receive our public key.
 const ECDHGracePeriod = 30 * time.Second
 
+// ensurePeriodicECDHBroadcast starts the periodic ECDH re-broadcast loop if it
+// is not already running.
+//
+// AICW-FORK (P0-b, §1.7 item E): the loop terminates after ECDH completes plus
+// the grace period. When a peer later rejoins (e.g. a rolling restart with a
+// fresh ephemeral DH key), we must resume broadcasting so the rejoining node
+// can receive our public key again. The atomic CAS guarantees at most one loop
+// runs concurrently, so repeated calls (startup + every rejoin) are safe.
+func (r *DynamicRegistry) ensurePeriodicECDHBroadcast() {
+	if r.ecdhSession == nil {
+		return
+	}
+	if atomic.CompareAndSwapInt32(&r.ecdhBroadcastRunning, 0, 1) {
+		go r.periodicECDHBroadcast()
+	}
+}
+
 // periodicECDHBroadcast periodically re-broadcasts ECDH public key until
 // key exchange is complete with all peers, plus a grace period.
 //
@@ -323,6 +403,10 @@ const ECDHGracePeriod = 30 * time.Second
 // we continue broadcasting for late-joining nodes that may have received
 // our earlier broadcasts but not yet sent theirs.
 func (r *DynamicRegistry) periodicECDHBroadcast() {
+	// AICW-FORK (P0-b): mark the loop stopped on exit so ensurePeriodicECDHBroadcast
+	// can restart it when a peer rejoins after the grace period.
+	defer atomic.StoreInt32(&r.ecdhBroadcastRunning, 0)
+
 	ticker := time.NewTicker(ECDHBroadcastPeriod)
 	defer ticker.Stop()
 
@@ -341,16 +425,18 @@ func (r *DynamicRegistry) periodicECDHBroadcast() {
 				return
 			}
 
-			expectedPeers := r.ecdhSession.GetExpectedPeerCount()
-			completedKeys := r.ecdhSession.GetCompletedKeyCount()
+			expectedPeers := r.ecdhSession.GetMeshExpectedPeerCount()
+			completedKeys := r.ecdhSession.GetMeshCompletedKeyCount()
 
-			// Check if we've completed key exchange
+			// Check if we've completed key exchange with every mesh peer.
+			// Use mesh-scoped counts so a lingering ceremonyPeers scope (3) does
+			// not falsely complete while a rejoining peer still needs a 4th key.
 			if expectedPeers > 0 && completedKeys >= expectedPeers {
 				if !graceActive {
 					// Start grace period
 					graceActive = true
 					graceDeadline = time.Now().Add(ECDHGracePeriod)
-					fmt.Printf("[ECDH] Key exchange complete: %d/%d symmetric keys established. Continuing broadcast for %.0fs grace period.\n",
+					fmt.Printf("[ECDH] Mesh key exchange complete: %d/%d symmetric keys established. Continuing broadcast for %.0fs grace period.\n",
 						completedKeys, expectedPeers, ECDHGracePeriod.Seconds())
 				}
 
@@ -371,11 +457,40 @@ func (r *DynamicRegistry) periodicECDHBroadcast() {
 			if err := r.ecdhSession.BroadcastPublicKey(); err != nil {
 				fmt.Printf("warning: periodic ECDH broadcast failed: %v\n", err)
 			} else if !graceActive {
-				fmt.Printf("[ECDH] Periodic re-broadcast: %d/%d keys (broadcasting until complete)\n",
+				fmt.Printf("[ECDH] Periodic re-broadcast: %d/%d mesh keys (broadcasting until complete)\n",
 					completedKeys, expectedPeers)
 			}
 		}
 	}
+}
+
+// handleECDHRejoin recovers ECDH state when a peer transitions back into the
+// ready state (or publishes a new ready epoch after restart without Resign).
+//
+// AICW-FORK (P0-b, §1.7): always flush the stale symmetric key, trigger
+// AddPeer renegotiation, and resume periodic broadcast — even if the broadcast
+// loop is still running. The loop may have falsely stopped (4/3 complete) or
+// be in grace while the rejoining peer still lacks a key.
+func (r *DynamicRegistry) handleECDHRejoin(peerID string) {
+	if r.ecdhSession == nil {
+		return
+	}
+
+	if r.identityStore != nil {
+		r.identityStore.RemoveSymmetricKey(peerID)
+	}
+
+	if err := r.ecdhSession.AddPeer(peerID); err != nil {
+		fmt.Printf("warning: ECDH AddPeer on peer %s rejoin failed: %v\n", peerID, err)
+	}
+
+	r.ensurePeriodicECDHBroadcast()
+	if err := r.ecdhSession.BroadcastPublicKey(); err != nil {
+		fmt.Printf("warning: ECDH re-broadcast on peer %s rejoin failed: %v\n", peerID, err)
+		return
+	}
+
+	fmt.Printf("[ECDH] Peer %s re-ready detected; reset stale symmetric key and resumed broadcast for re-negotiation\n", peerID)
 }
 
 // Resign removes this node from Consul.
@@ -429,15 +544,15 @@ func (r *DynamicRegistry) checkPeerReadiness() {
 		return
 	}
 
-	// Build set of ready peers
-	readyPeers := make(map[string]struct{})
+	// Build set of ready peers and their epoch values
+	readyPeers := make(map[string]string)
 	for _, pair := range pairs {
 		var peerID string
 		_, err := fmt.Sscanf(pair.Key, "ready/%s", &peerID)
 		if err != nil || peerID == r.nodeID {
 			continue
 		}
-		readyPeers[peerID] = struct{}{}
+		readyPeers[peerID] = string(pair.Value)
 	}
 
 	r.mu.Lock()
@@ -445,8 +560,9 @@ func (r *DynamicRegistry) checkPeerReadiness() {
 
 	// Process peer readiness changes
 	for peerID := range r.peerNodeIDs {
-		_, isReady := readyPeers[peerID]
+		epoch, isReady := readyPeers[peerID]
 		wasReady := r.readyMap[peerID]
+		prevEpoch := r.readyEpoch[peerID]
 
 		if isReady && !wasReady {
 			// Peer became ready
@@ -455,16 +571,26 @@ func (r *DynamicRegistry) checkPeerReadiness() {
 			if r.onPeerConnected != nil {
 				go r.onPeerConnected(peerID)
 			}
-			// AICW-FORK: Removed 500ms hardcoded delay re-broadcast.
-			// The periodic re-broadcast loop (periodicECDHBroadcast) now handles
-			// ensuring late-joining nodes receive our public key.
+			go r.handleECDHRejoin(peerID)
+		} else if isReady && wasReady && epoch != prevEpoch {
+			// Peer restarted without Resign(): ready key persisted but epoch changed.
+			go r.handleECDHRejoin(peerID)
 		} else if !isReady && wasReady {
 			// Peer became not ready
 			r.readyMap[peerID] = false
 			atomic.AddInt64(&r.readyCount, -1)
+			if r.identityStore != nil {
+				r.identityStore.RemoveSymmetricKey(peerID)
+			}
 			if r.onPeerDisconnected != nil {
 				go r.onPeerDisconnected(peerID)
 			}
+		}
+
+		if isReady {
+			r.readyEpoch[peerID] = epoch
+		} else {
+			delete(r.readyEpoch, peerID)
 		}
 	}
 
@@ -526,7 +652,146 @@ func (r *DynamicRegistry) ArePeersReady() bool {
 	}
 
 	readyParticipants := atomic.LoadInt64(&r.readyCount) // self + ready peers
-	return readyParticipants >= int64(r.mpcThreshold+1)
+	if readyParticipants < int64(r.mpcThreshold+1) {
+		return false
+	}
+
+	// AICW-FORK (P0-b, §1.7 item D — ECDH ceremony gate): Consul "ready" alone
+	// is not sufficient to start a keygen. A node can be marked ready while its
+	// symmetric-key exchange is still incomplete (the "2/4 keys" state). If a
+	// ceremony starts in that window it fails mid-flight with "symmetric key not
+	// found" / "ciphertext too short, tampered message". Hold the gate until the
+	// local ECDH exchange is complete with every known peer. This only tightens
+	// the gate: a fully-exchanged cluster still passes.
+	if r.ecdhSession != nil {
+		expected := r.ecdhSession.GetMeshExpectedPeerCount()
+		if expected == 0 {
+			return false
+		}
+		if r.ecdhSession.GetMeshCompletedKeyCount() < expected {
+			return false
+		}
+	}
+
+	return true
+}
+
+// AreCeremonyReady reports whether the given committee is ready to run a
+// keygen/reshare/sign ceremony from this node's perspective.
+//
+// AICW-FORK (P0-a, §13.3 — committee-local ECDH gate): unlike ArePeersReady
+// (which reasons about the whole registry / full-mesh), this checks only the
+// committee members. A member is ceremony-ready when it is both Consul-ready
+// AND this node holds an established symmetric key with it. This is the precise
+// gate the keygen/reshare/sign paths use once SelectCommittee (P1) decides the
+// committee, so a large network only needs ECDH within the committee.
+func (r *DynamicRegistry) AreCeremonyReady(committee []string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// Quorum floor: a committee must have at least t+1 members.
+	if len(committee) < r.mpcThreshold+1 {
+		return false
+	}
+
+	selfIncluded := false
+	for _, id := range committee {
+		if id == r.nodeID {
+			selfIncluded = true
+			continue
+		}
+		// Consul readiness for this committee member.
+		if !r.readyMap[id] {
+			return false
+		}
+		// Committee-local ECDH: a symmetric key with this member must exist.
+		if r.identityStore != nil {
+			if _, err := r.identityStore.GetSymmetricKey(id); err != nil {
+				return false
+			}
+		}
+	}
+
+	// This node must itself be a member of the committee to be "ceremony ready";
+	// a non-member skips the ceremony (handled by the keygen party filter in P1).
+	return selfIncluded
+}
+
+// EnsureCeremonyECDH scopes ECDH to the committee and ensures the periodic
+// broadcast is running so symmetric keys with every committee member converge.
+//
+// AICW-FORK (P0-a, §13.4 point 4): invoked just before a ceremony (wired in P1).
+func (r *DynamicRegistry) EnsureCeremonyECDH(committee []string) error {
+	if r.ecdhSession == nil {
+		return fmt.Errorf("ECDH session not configured")
+	}
+	// Make sure the broadcast loop is active even if it stopped after grace.
+	r.ensurePeriodicECDHBroadcast()
+	return r.ecdhSession.EnsureECDH(committee)
+}
+
+// CeremonyFilterEnabled reports whether committee-local ceremony mode is active.
+// AICW-FORK (§13.5).
+func (r *DynamicRegistry) CeremonyFilterEnabled() bool {
+	return r.committeePolicy != nil && committee.KeygenFilterEnabled()
+}
+
+// SetECDHGateTimeout overrides the committee ECDH-gate wait budget (§13.3).
+// Call once at startup. AICW-FORK.
+func (r *DynamicRegistry) SetECDHGateTimeout(d time.Duration) {
+	if d > 0 {
+		r.ecdhGateTimeout = d
+	}
+}
+
+// EnsureCeremonyReady is the committee-local ceremony gate (§13.3/§13.4).
+//
+//   - Legacy mode (committee filter off): preserve the full-cluster gate
+//     (ArePeersReady), so 5-node/test deployments behave exactly as before.
+//   - Committee mode, no committee context (empty list — e.g. the consumer
+//     startup gate): require only a signing quorum (t+1) to be ready, since the
+//     wallet's committee is not known until a request arrives.
+//   - Committee mode with a committee: scope+trigger ECDH for the committee and
+//     block until every member is ceremony-ready (Consul-ready + symmetric key)
+//     or the ECDH-gate timeout elapses.
+func (r *DynamicRegistry) EnsureCeremonyReady(committee []string) error {
+	if !r.CeremonyFilterEnabled() {
+		if !r.ArePeersReady() {
+			return fmt.Errorf("cluster not ready")
+		}
+		return nil
+	}
+
+	if len(committee) == 0 {
+		if !r.AreMajorityReady() {
+			return fmt.Errorf("quorum not ready")
+		}
+		return nil
+	}
+
+	if err := r.EnsureCeremonyECDH(committee); err != nil {
+		return fmt.Errorf("ensure committee ECDH: %w", err)
+	}
+
+	timeout := r.ecdhGateTimeout
+	if timeout <= 0 {
+		timeout = DefaultECDHGateTimeout
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		if r.AreCeremonyReady(committee) {
+			// Restore full-mesh counting so periodic broadcast does not falsely
+			// complete at committee size after a keygen ceremony.
+			if r.ecdhSession != nil {
+				r.ecdhSession.ClearCeremonyScope()
+			}
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("ecdh_not_ready: committee ECDH incomplete after %s", timeout)
+		}
+		time.Sleep(ReadinessCheckPeriod)
+	}
 }
 
 // AreMajorityReady returns true if majority peers are ready.
@@ -553,6 +818,38 @@ func (r *DynamicRegistry) GetReadyPeersIncludeSelf() []string {
 	}
 	peerIDs = append(peerIDs, r.nodeID)
 	return peerIDs
+}
+
+// SetCommitteePolicy sets the committee-selection policy used by the keygen
+// party filter. Call once at startup before Ready(). AICW-FORK (P1, §13.5).
+func (r *DynamicRegistry) SetCommitteePolicy(p committee.Policy) {
+	r.committeePolicy = &p
+}
+
+// GetKeygenParty returns the party (peer IDs including self) for a wallet's
+// keygen. When the committee filter is disabled (default) or no policy is set,
+// it returns the full ready set — identical to the legacy behavior. When
+// enabled, it returns the deterministic, tier-sized committee (§13.5).
+//
+// AICW-FORK: this is the mpcium PeerRegistry hook that replaces
+// GetReadyPeersIncludeSelf() as the keygen party source (§13.5). Committee
+// selection is deterministic (committee.SelectCommittee), so every node that
+// shares the same ready view computes the same committee — a hard requirement
+// since the committee is not carried in the keygen message. On any selection
+// error it falls back to the full ready set (never worse than legacy).
+func (r *DynamicRegistry) GetKeygenParty(walletID string) []string {
+	ready := r.GetReadyPeersIncludeSelf()
+
+	if r.committeePolicy == nil || !committee.KeygenFilterEnabled() {
+		return ready
+	}
+
+	plan, err := r.committeePolicy.SelectCommittee(walletID, nil, ready)
+	if err != nil {
+		fmt.Printf("warning: committee selection failed for wallet %s (%v); using full ready set\n", walletID, err)
+		return ready
+	}
+	return plan.NodeIDs
 }
 
 // GetAllPeerIDs returns all known peer IDs.

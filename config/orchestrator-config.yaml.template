@@ -1,0 +1,98 @@
+# reshare-orchestrator configuration (auto_reshare_design.md §2, §9.3).
+#
+# The orchestrator is a SEPARATE, non-public background process from mpc-bridge.
+# It monitors wallet committees and publishes auto-reshare events. Run it with:
+#
+#   reshare-orchestrator \
+#     --network-config network-config.yaml \
+#     --config orchestrator-config.yaml
+#
+# It MUST load the SAME committee_policy as every node (pass the shared
+# network-config.yaml via --network-config); this file only carries the
+# orchestrator-specific runtime knobs and the initiator key path.
+
+# Shared with the network. The orchestrator reuses committee_policy from here
+# for deterministic committee selection, so keep --network-config pointed at the
+# same file the nodes use. (Duplicated keys below are orchestrator-only.)
+
+nats:
+  url: "nats://127.0.0.1:4222"
+
+consul:
+  address: "127.0.0.1:8500"
+
+environment: development
+
+# Event initiator key that signs mpc:reshare messages. For §5F key separation,
+# use a DIFFERENT key from the Bridge (register both in each node identity).
+# Precedence: this path -> $RESHARE_ORCHESTRATOR_EVENT_INITIATOR_KEY_PATH ->
+# ./event_initiator.key.
+event_initiator_algorithm: ed25519
+
+orchestrator:
+  # Reconcile loop period (§6.4). 60s tolerates 1–2 missed 90s pings.
+  scan_interval_seconds: 60
+
+  # Committee-local ECDH gate wait before an orchestrator reshare pre-flight
+  # gives up (§13.3). Mirrors the node-side ecdh_gate.timeout_seconds.
+  ecdh_gate:
+    timeout_seconds: 120
+
+  # Rate limiting / conflict control (§6.2).
+  cooldown_success_minutes: 30
+  cooldown_failure_minutes: 5
+  cooldown_failure_max_minutes: 60
+  global_max_inflight: 3
+
+  # Timeouts (§7.3).
+  reshare_result_timeout_minutes: 10
+  inflight_lock_ttl_minutes: 15
+
+  # Hysteresis (§3.3): consecutive scans a non-urgent trigger must persist
+  # before acting. Urgent triggers act immediately.
+  confirm_dead_scans: 2
+
+  # §13.6 legacy migration: proactively shrink committees larger than the tier
+  # target. OFF by default to avoid a reshare storm on first deploy; still
+  # rate-limited by cooldown/global_max_inflight when enabled.
+  migrate_oversized: false
+
+  # Path to the reshare initiator key (see §5F above). Empty -> env / default.
+  event_initiator_key_path: "/secrets/reshare_initiator.key"
+
+  # Optional override for the node_web bulk active-node endpoint base URL. When
+  # empty the orchestrator falls back to node_web.url, and if that is empty it
+  # degrades to using Consul `ready/` as the ping signal.
+  node_web_url: ""
+
+  # Authorizers (§5.3D) — Phase 2 anti-abuse. When `list` is non-empty the
+  # orchestrator collects a signature from EVERY listed authorizer over
+  # ComposeAuthorizerRaw(msg) and attaches them to each reshare event. The set
+  # here MUST cover the nodes' authorization.required_authorizers, or nodes
+  # reject the reshare. Leave empty for Phase 1 (orchestrator-only + audit).
+  #
+  # Node side (config only — already wired in mpcium identity): enable per node
+  #   authorization:
+  #     enabled: true
+  #     required_authorizers: [authorizer1, authorizer2]
+  #     authorizer_public_keys:
+  #       authorizer1: { algorithm: ed25519, public_key: "<hex>" }
+  #       authorizer2: { algorithm: ed25519, public_key: "<hex>" }
+  authorizers:
+    request_timeout_seconds: 10
+    list: []
+    # Example (uncomment and adapt):
+    # - id: authorizer1
+    #   mode: local            # local key file on the orchestrator host
+    #   key_path: /secrets/authorizer1.authorizer.key
+    #   algorithm: ed25519
+    # - id: authorizer2
+    #   mode: remote           # offline/HSM signing service (recommended for prod)
+    #   url: https://authorizer2.internal/sign
+    #   token_env: AUTHORIZER2_TOKEN   # bearer token read from this env var
+
+# node_web bulk liveness (§9.2). GET {url}/api/nodes/active returns active node
+# IDs (last ping within PING_MAX_AGE_MS). Leave ping_enabled for the nodes; the
+# orchestrator only reads the /active endpoint.
+node_web:
+  url: ""

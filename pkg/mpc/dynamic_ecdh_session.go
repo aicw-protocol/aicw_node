@@ -26,8 +26,31 @@ type DynamicECDHSession interface {
 	// This removes the symmetric key for the peer.
 	RemovePeer(peerID string)
 
-	// GetExpectedPeerCount returns the number of expected peers.
+	// GetExpectedPeerCount returns the number of expected peers for the active
+	// scope (committee when scoped, otherwise full mesh).
 	GetExpectedPeerCount() int
+
+	// GetMeshExpectedPeerCount returns the full-mesh peer count (registry-wide).
+	// Periodic broadcast and startup gates use this, not the ceremony scope.
+	GetMeshExpectedPeerCount() int
+
+	// GetMeshCompletedKeyCount returns how many mesh peers have symmetric keys.
+	GetMeshCompletedKeyCount() int
+
+	// ClearCeremonyScope clears committee-local scope after a ceremony gate passes.
+	ClearCeremonyScope()
+
+	// SetCeremonyPeers restricts the "expected peers" scope to a specific
+	// committee (excluding self). Passing nil/empty clears the scope and
+	// restores full-mesh (registry-wide) behavior.
+	// AICW-FORK (P0-a, §13.4): committee-local ECDH.
+	SetCeremonyPeers(peerIDs []string)
+
+	// EnsureECDH ensures this node is exchanging keys with every committee
+	// member, sets the ceremony scope to that committee, and re-broadcasts so
+	// symmetric keys are (re)derived. Called just before a ceremony (wired P1).
+	// AICW-FORK (P0-a, §13.4).
+	EnsureECDH(committee []string) error
 
 	// GetCompletedKeyCount returns the number of completed key exchanges.
 	GetCompletedKeyCount() int
@@ -63,6 +86,12 @@ type DynamicECDHSessionImpl struct {
 	nodeID        string
 	peerIDs       map[string]struct{}
 	identityStore identity.Store
+
+	// AICW-FORK (P0-a, §13.4): optional committee scope for ECDH. When non-nil
+	// the "expected peers" count is the committee (minus self) rather than the
+	// full registry, so a large network avoids an O(N) full-mesh exchange.
+	// nil means no scope is active (full-mesh fallback).
+	ceremonyPeers map[string]struct{}
 
 	// Wrapped original ecdhSession (does actual X25519 crypto)
 	inner mpciumpc.ECDHSession
@@ -113,7 +142,22 @@ func (e *DynamicECDHSessionImpl) AddPeer(peerID string) error {
 	defer e.mu.Unlock()
 
 	if _, exists := e.peerIDs[peerID]; exists {
-		return nil // Already added
+		// AICW-FORK (P0-b, §1.7 item B — rejoin path): the peer is already known
+		// but may have restarted with a fresh ephemeral DH key, leaving our
+		// stored symmetric key stale. Instead of the previous early return (which
+		// left the rejoining node unable to re-establish a key), drop the stale
+		// key and re-broadcast so both sides re-derive a fresh shared secret.
+		// This is a no-op for a peer that never actually restarted: re-derivation
+		// from unchanged keys yields the identical symmetric key.
+		if e.identityStore != nil {
+			e.identityStore.RemoveSymmetricKey(peerID)
+		}
+		if e.inner != nil {
+			if err := e.inner.BroadcastPublicKey(); err != nil {
+				return fmt.Errorf("failed to re-broadcast public key for rejoining peer %s: %w", peerID, err)
+			}
+		}
+		return nil
 	}
 
 	// Add to our dynamic peer list
@@ -154,10 +198,95 @@ func (e *DynamicECDHSessionImpl) RemovePeer(peerID string) {
 
 // GetExpectedPeerCount returns the number of expected peers.
 // AICW-FORK: Uses our dynamic peerIDs list, not the original's fixed list.
+// AICW-FORK (P0-a, §13.4): when a ceremony scope is set, the expected count is
+// the committee size (minus self); otherwise it falls back to the full dynamic
+// peer set (full-mesh).
 func (e *DynamicECDHSessionImpl) GetExpectedPeerCount() int {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	if len(e.ceremonyPeers) > 0 {
+		return len(e.ceremonyPeers)
+	}
 	return len(e.peerIDs)
+}
+
+// GetMeshExpectedPeerCount returns the registry-wide mesh size (excluding self).
+func (e *DynamicECDHSessionImpl) GetMeshExpectedPeerCount() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return len(e.peerIDs)
+}
+
+// GetMeshCompletedKeyCount counts symmetric keys only for known mesh peers.
+// Unlike GetCompletedKeyCount (total store size), this ignores stale/extra keys
+// and reflects whether each mesh peer has a key.
+func (e *DynamicECDHSessionImpl) GetMeshCompletedKeyCount() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.identityStore == nil {
+		return 0
+	}
+	count := 0
+	for peerID := range e.peerIDs {
+		if _, err := e.identityStore.GetSymmetricKey(peerID); err == nil {
+			count++
+		}
+	}
+	return count
+}
+
+// ClearCeremonyScope restores full-mesh expected-peer counting after a ceremony.
+func (e *DynamicECDHSessionImpl) ClearCeremonyScope() {
+	e.SetCeremonyPeers(nil)
+}
+
+// SetCeremonyPeers restricts the ECDH expected-peer scope to a committee.
+// Passing nil/empty clears the scope (full-mesh fallback).
+// AICW-FORK (P0-a, §13.4).
+func (e *DynamicECDHSessionImpl) SetCeremonyPeers(peerIDs []string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(peerIDs) == 0 {
+		e.ceremonyPeers = nil
+		return
+	}
+	scope := make(map[string]struct{}, len(peerIDs))
+	for _, id := range peerIDs {
+		if id != e.nodeID {
+			scope[id] = struct{}{}
+		}
+	}
+	e.ceremonyPeers = scope
+}
+
+// EnsureECDH ensures symmetric keys with every committee member, sets the
+// ceremony scope to the committee, and re-broadcasts this node's public key so
+// keys are (re)derived. Called just before a keygen/reshare/sign ceremony.
+// AICW-FORK (P0-a, §13.4 point 4).
+func (e *DynamicECDHSessionImpl) EnsureECDH(committee []string) error {
+	e.mu.Lock()
+	scope := make(map[string]struct{}, len(committee))
+	for _, id := range committee {
+		if id == e.nodeID {
+			continue
+		}
+		scope[id] = struct{}{}
+		// Ensure the exchange set covers this member so completion counting and
+		// the periodic broadcast include it.
+		e.peerIDs[id] = struct{}{}
+	}
+	if len(scope) > 0 {
+		e.ceremonyPeers = scope
+	}
+	inner := e.inner
+	e.mu.Unlock()
+
+	if inner != nil {
+		if err := inner.BroadcastPublicKey(); err != nil {
+			return fmt.Errorf("failed to broadcast public key for ceremony ECDH: %w", err)
+		}
+	}
+	return nil
 }
 
 // GetCompletedKeyCount returns the number of completed key exchanges.
@@ -172,7 +301,8 @@ func (e *DynamicECDHSessionImpl) GetCompletedKeyCount() int {
 // IsKeyExchangeComplete checks if all expected keys are established.
 // AICW-FORK: Uses our dynamic peer count, not the original's fixed count.
 func (e *DynamicECDHSessionImpl) IsKeyExchangeComplete() bool {
-	return e.identityStore.CheckSymmetricKeyComplete(e.GetExpectedPeerCount())
+	return e.GetMeshCompletedKeyCount() >= e.GetMeshExpectedPeerCount() &&
+		e.GetMeshExpectedPeerCount() > 0
 }
 
 // OnKeyExchangeComplete sets the callback for when key exchange completes.
