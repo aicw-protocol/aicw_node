@@ -76,8 +76,20 @@ echo "==> Building GUI (${platform})"
 pushd "$GUI_DIR" >/dev/null
 export CGO_ENABLED=1
 
+target_goarch="$GOARCH"
+wails_build_args=(-platform "$platform" -clean -skipbindings)
+if [ "$GOOS" = "linux" ]; then
+  # Ubuntu 24.04+ ships webkit2gtk 4.1; Wails defaults to 4.0 pkg-config.
+  wails_build_args+=(-tags webkit2_41)
+fi
+
+# Wails understands darwin/universal via -platform; GOARCH=universal breaks the Go toolchain.
+if [ "$GOOS" = "darwin" ] && [ "$target_goarch" = "universal" ]; then
+  unset GOARCH
+fi
+
 if command -v wails >/dev/null 2>&1; then
-  wails build -platform "$platform" -clean -skipbindings
+  wails build "${wails_build_args[@]}"
   rm -rf "$DIST_DIR"/aicw-node-setup-*.app "$SETUP_DIST" 2>/dev/null || true
   if [ "$GOOS" = "darwin" ]; then
     app_path="$(find build/bin -maxdepth 1 -name '*.app' -print -quit)"
@@ -96,7 +108,14 @@ if command -v wails >/dev/null 2>&1; then
   fi
 else
   ldflags="-s -w"
-  GOOS="$GOOS" GOARCH="$GOARCH" go build -tags production -trimpath -ldflags="$ldflags" \
+  go_tags="production"
+  if [ "$GOOS" = "linux" ]; then
+    go_tags="production,webkit2_41"
+  fi
+  if [ "$GOOS" = "darwin" ] && [ "$target_goarch" = "universal" ]; then
+    GOARCH=arm64
+  fi
+  GOOS="$GOOS" GOARCH="${GOARCH:-$target_goarch}" go build -tags "$go_tags" -trimpath -ldflags="$ldflags" \
     -o "$SETUP_DIST" .
   chmod +x "$SETUP_DIST"
 fi
