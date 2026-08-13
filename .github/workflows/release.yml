@@ -136,6 +136,19 @@ jobs:
           find dist -mindepth 2 -type d -empty -delete 2>/dev/null || true
           ls -la dist/
 
+      - name: Package GUI download zips
+        run: |
+          cd dist
+          if [ -f aicw-node-setup-windows-amd64.exe ]; then
+            engine="aicw-node.exe"
+            [ -f "$engine" ] || cp aicw-node-windows-amd64.exe "$engine"
+            zip -j aicw-node-setup-windows-amd64.zip aicw-node-setup-windows-amd64.exe "$engine"
+          fi
+          if [ -f aicw-node-setup-linux-amd64 ]; then
+            zip -j aicw-node-setup-linux-amd64.zip aicw-node-setup-linux-amd64 aicw-node-linux-amd64
+          fi
+          ls -la
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

@@ -98,6 +98,8 @@ if command -v wails >/dev/null 2>&1; then
       echo "Wails did not produce a .app bundle under build/bin" >&2
       exit 1
     fi
+    cp "$NODE_LOCAL" "$app_path/Contents/MacOS/aicw-node"
+    chmod +x "$app_path/Contents/MacOS/aicw-node" 2>/dev/null || true
     ditto -c -k --sequesterRsrc --keepParent "$app_path" "$SETUP_DIST"
   else
     built="$(find build/bin -maxdepth 1 -type f -name 'aicw-node-setup*' -print -quit)"
@@ -125,7 +127,12 @@ popd >/dev/null
 cp "$NODE_LOCAL" "$NODE_DIST"
 chmod +x "$NODE_DIST" 2>/dev/null || true
 
-# Convenience symlink-style copy for native builds
+# Ship engine next to GUI installer (same folder as release downloads / zip contents).
+bundled_engine="$DIST_DIR/$node_local_name"
+cp "$NODE_LOCAL" "$bundled_engine"
+chmod +x "$bundled_engine" 2>/dev/null || true
+
+# Convenience copies for native dev builds
 if [ "$GOOS" = "$(go env GOOS)" ] && [ "$TARGET_GOARCH" = "$(go env GOARCH)" ]; then
   cp "$NODE_DIST" "$DIST_DIR/aicw-node" 2>/dev/null || cp "$NODE_DIST" "$DIST_DIR/aicw-node.exe" 2>/dev/null || true
   if [ "$GOOS" != "darwin" ] || [ "$TARGET_GOARCH" != "universal" ]; then

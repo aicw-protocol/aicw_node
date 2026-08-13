@@ -21,7 +21,10 @@ func NodeReleaseAssetName(goos, goarch string) string {
 // GUIReleaseAssetName is the desktop installer/launcher filename per platform.
 func GUIReleaseAssetName(goos, goarch string) string {
 	if goos == "windows" {
-		return "aicw-node-setup-" + goos + "-" + goarch + ".exe"
+		return "aicw-node-setup-" + goos + "-" + goarch + ".zip"
+	}
+	if goos == "linux" {
+		return "aicw-node-setup-" + goos + "-" + goarch + ".zip"
 	}
 	if goos == "darwin" && goarch == "universal" {
 		return "aicw-node-setup-darwin-universal.app.zip"

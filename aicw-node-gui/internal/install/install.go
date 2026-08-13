@@ -45,10 +45,20 @@ func SaveState(path string, state *State) error {
 func FindBundledNodeBinary(exePath string) string {
 	dir := filepath.Dir(exePath)
 	name := NodeBinaryName()
+
 	candidates := []string{
 		filepath.Join(dir, name),
 		filepath.Join(dir, "aicw-node"),
 		filepath.Join(dir, "aicw-node.exe"),
+		filepath.Join(dir, NodeReleaseAssetName("windows", "amd64")),
+		filepath.Join(dir, NodeReleaseAssetName("linux", "amd64")),
+		filepath.Join(dir, NodeReleaseAssetName("linux", "arm64")),
+		filepath.Join(dir, NodeReleaseAssetName("darwin", "amd64")),
+		filepath.Join(dir, NodeReleaseAssetName("darwin", "arm64")),
+		filepath.Join(dir, "aicw-node-darwin-universal"),
+		// macOS .app bundle (engine copied into Contents/MacOS during build)
+		filepath.Join(dir, "..", "Resources", name),
+		filepath.Join(dir, "..", "Resources", "aicw-node"),
 		filepath.Join(dir, "..", name),
 		filepath.Join(dir, "..", "dist", NodeReleaseAssetName("windows", "amd64")),
 		filepath.Join(dir, "..", "dist", NodeReleaseAssetName("linux", "amd64")),
