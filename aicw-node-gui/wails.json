@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "aicw-node-gui",
+  "outputfilename": "aicw-node-setup",
+  "frontend:install": "echo skip",
+  "frontend:build": "echo skip",
+  "frontend:dev:watcher": "echo skip",
+  "frontend:dev:serverUrl": "",
+  "author": {
+    "name": "AICW",
+    "email": ""
+  },
+  "info": {
+    "companyName": "AICW",
+    "productName": "AICW Node",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright AICW",
+    "comments": "AICW Node desktop installer and launcher"
+  }
+}

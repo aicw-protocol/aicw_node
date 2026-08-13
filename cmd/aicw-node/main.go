@@ -406,7 +406,7 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	if viper.GetBool("healthcheck.enabled") {
 		healthAddr := viper.GetString("healthcheck.address")
 		if healthAddr == "" {
-			healthAddr = ":8080"
+			healthAddr = ":8082"
 		}
 		healthServer = healthcheck.NewServer(healthAddr, dynamicRegistry, natsConn, consulClient)
 		go func() {

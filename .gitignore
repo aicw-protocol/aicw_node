@@ -12,9 +12,13 @@
 /operator
 /mpc-bridge
 /mpcium-node
+/dist/
+/aicw-node-gui/aicw-node.exe
+/aicw-node-gui/build/
 
 # Runtime / local data
 test-local/
+package-node/
 **/backups/
 **/*.db
 **/badger/
@@ -24,6 +28,14 @@ docs/
 findings/
 begin.md
 NODE_OPERATOR_MANUAL.ko.md
+NODE_OPERATOR_MANUAL.md
+노드에포함되어야할.md
+reshare개념잡기.md
+
+# Built binaries at repo root (not release artifacts)
+/aicw-node-linux
+/aicw-node-linux*
+/reshare-orchestrator-linux*
 
 # Go
 /vendor/
