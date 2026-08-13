@@ -20,6 +20,7 @@ mkdir -p "$DIST_DIR"
 
 GOOS="${GOOS:-$(go env GOOS)}"
 GOARCH="${GOARCH:-$(go env GOARCH)}"
+TARGET_GOARCH="$GOARCH"
 
 node_local_name="aicw-node"
 setup_suffix="${GOOS}-${GOARCH}"
@@ -76,7 +77,7 @@ echo "==> Building GUI (${platform})"
 pushd "$GUI_DIR" >/dev/null
 export CGO_ENABLED=1
 
-target_goarch="$GOARCH"
+target_goarch="$TARGET_GOARCH"
 wails_build_args=(-platform "$platform" -clean -skipbindings)
 if [ "$GOOS" = "linux" ]; then
   # Ubuntu 24.04+ ships webkit2gtk 4.1; Wails defaults to 4.0 pkg-config.
@@ -125,9 +126,9 @@ cp "$NODE_LOCAL" "$NODE_DIST"
 chmod +x "$NODE_DIST" 2>/dev/null || true
 
 # Convenience symlink-style copy for native builds
-if [ "$GOOS" = "$(go env GOOS)" ] && [ "$GOARCH" = "$(go env GOARCH)" ]; then
+if [ "$GOOS" = "$(go env GOOS)" ] && [ "$TARGET_GOARCH" = "$(go env GOARCH)" ]; then
   cp "$NODE_DIST" "$DIST_DIR/aicw-node" 2>/dev/null || cp "$NODE_DIST" "$DIST_DIR/aicw-node.exe" 2>/dev/null || true
-  if [ "$GOOS" != "darwin" ] || [ "$GOARCH" != "universal" ]; then
+  if [ "$GOOS" != "darwin" ] || [ "$TARGET_GOARCH" != "universal" ]; then
     cp "$SETUP_DIST" "$DIST_DIR/aicw-node-setup" 2>/dev/null || cp "$SETUP_DIST" "$DIST_DIR/aicw-node-setup.exe" 2>/dev/null || true
   fi
 fi
