@@ -221,6 +221,7 @@ export namespace main {
 	
 	export class RegisterNodeResult {
 	    ok: boolean;
+	    pending?: boolean;
 	    error?: string;
 	    nodeId?: string;
 	    nodeName?: string;
@@ -234,6 +235,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
+	        this.pending = source["pending"];
 	        this.error = source["error"];
 	        this.nodeId = source["nodeId"];
 	        this.nodeName = source["nodeName"];

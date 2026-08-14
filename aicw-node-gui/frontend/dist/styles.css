@@ -517,6 +517,11 @@ button.danger:not(:disabled):hover {
   margin-top: 16px;
 }
 
+.register-phase {
+  margin: 12px 0 0;
+  line-height: 1.45;
+}
+
 .field-label {
   display: block;
   margin-top: 14px;

@@ -41,6 +41,10 @@ type App struct {
 	installScope    string
 	closePromptOpen bool
 	quitting        bool
+
+	registerMu     sync.Mutex
+	registerActive bool
+	registerPhase  string
 }
 
 func NewApp() *App {
@@ -244,6 +248,7 @@ func (a *App) SignInWithBrowser() BrowserSignInResult {
 
 type RegisterNodeResult struct {
 	OK        bool   `json:"ok"`
+	Pending   bool   `json:"pending,omitempty"`
 	Error     string `json:"error,omitempty"`
 	NodeID    string `json:"nodeId,omitempty"`
 	NodeName  string `json:"nodeName,omitempty"`
@@ -251,11 +256,101 @@ type RegisterNodeResult struct {
 	AuthURL   string `json:"authUrl,omitempty"`
 }
 
+func (a *App) setRegisterPhase(phase string) {
+	a.registerMu.Lock()
+	a.registerPhase = phase
+	a.registerMu.Unlock()
+	runtime.EventsEmit(a.ctx, "register:phase", phase)
+}
+
+func (a *App) finishRegisterJob(result RegisterNodeResult) {
+	a.registerMu.Lock()
+	a.registerActive = false
+	a.registerPhase = ""
+	a.registerMu.Unlock()
+	runtime.EventsEmit(a.ctx, "register:finished", result)
+}
+
+func (a *App) emitRegisterFailure(authURL, message string) {
+	a.finishRegisterJob(RegisterNodeResult{Error: message, AuthURL: authURL})
+}
+
+func (a *App) runRegisterNodeJob(
+	server *authserver.Server,
+	generated *nodeidentity.Generated,
+	wallet, installDir, authURL string,
+) {
+	a.setRegisterPhase("waiting_wallet")
+	result, err := server.WaitResult(3 * time.Minute)
+	if err != nil {
+		a.emitRegisterFailure(authURL, err.Error())
+		return
+	}
+	if result.Wallet != wallet {
+		a.emitRegisterFailure(authURL, "Signed wallet does not match the desktop session.")
+		return
+	}
+
+	a.setRegisterPhase("registering")
+	_, err = a.webClient.RegisterNode(nodeweb.RegisterNodeRequest{
+		NodeID:              generated.NodeID,
+		NodeName:            generated.NodeName,
+		PublicKey:           generated.PublicKey,
+		ChallengeToken:      result.ChallengeToken,
+		Wallet:              result.Wallet,
+		SignatureBase64:     result.SignatureBase64,
+		Message:             result.Message,
+		SignedMessageBase64: result.SignedMessageBase64,
+	})
+	if err != nil {
+		a.emitRegisterFailure(authURL, err.Error())
+		return
+	}
+
+	a.setRegisterPhase("configuring")
+	onboarding, err := a.webClient.GetOnboardingConfig()
+	if err != nil {
+		a.emitRegisterFailure(authURL, err.Error())
+		return
+	}
+
+	nodeWebURL := onboarding.NodeWebURL
+	if nodeWebURL == "" {
+		nodeWebURL = a.webClient.BaseURL
+	}
+	operatorYAML := setupfiles.BuildOperatorConfigYAML(nodeWebURL, onboarding.PingIntervalSeconds)
+	if _, err := setupfiles.EnsureSharedFiles(installDir, onboarding.NetworkConfigYaml, operatorYAML); err != nil {
+		a.emitRegisterFailure(authURL, err.Error())
+		return
+	}
+	if err := nodeidentity.WriteFiles(installDir, generated); err != nil {
+		a.emitRegisterFailure(authURL, err.Error())
+		return
+	}
+
+	a.finishRegisterJob(RegisterNodeResult{
+		OK:        true,
+		NodeID:    generated.NodeID,
+		NodeName:  generated.NodeName,
+		PublicKey: generated.PublicKey,
+		AuthURL:   authURL,
+	})
+}
+
 func (a *App) RegisterNode(nodeName string) RegisterNodeResult {
 	nodeName = strings.TrimSpace(nodeName)
 	if err := nodeidentity.ValidateNodeName(nodeName); err != nil {
 		return RegisterNodeResult{Error: err.Error()}
 	}
+
+	a.registerMu.Lock()
+	if a.registerActive {
+		a.registerMu.Unlock()
+		return RegisterNodeResult{Error: "A registration is already in progress."}
+	}
+	a.registerActive = true
+	a.registerPhase = "waiting_wallet"
+	a.registerMu.Unlock()
 
 	a.mu.Lock()
 	wallet := ""
@@ -268,14 +363,26 @@ func (a *App) RegisterNode(nodeName string) RegisterNodeResult {
 	a.mu.Unlock()
 
 	if wallet == "" {
+		a.registerMu.Lock()
+		a.registerActive = false
+		a.registerPhase = ""
+		a.registerMu.Unlock()
 		return RegisterNodeResult{Error: "Sign in with your wallet first."}
 	}
 	if !verified {
+		a.registerMu.Lock()
+		a.registerActive = false
+		a.registerPhase = ""
+		a.registerMu.Unlock()
 		return RegisterNodeResult{Error: "Use Sign in with Browser so your wallet is verified before registering a node."}
 	}
 
 	status, err := a.webClient.GetWalletStatus(wallet)
 	if err != nil {
+		a.registerMu.Lock()
+		a.registerActive = false
+		a.registerPhase = ""
+		a.registerMu.Unlock()
 		return RegisterNodeResult{Error: err.Error()}
 	}
 	if !status.Eligibility.CanRegister {
@@ -283,19 +390,31 @@ func (a *App) RegisterNode(nodeName string) RegisterNodeResult {
 		if status.Eligibility.BlockReason != nil && *status.Eligibility.BlockReason != "" {
 			reason = *status.Eligibility.BlockReason
 		}
+		a.registerMu.Lock()
+		a.registerActive = false
+		a.registerPhase = ""
+		a.registerMu.Unlock()
 		return RegisterNodeResult{Error: reason}
 	}
 
 	generated, err := nodeidentity.Generate(nodeName)
 	if err != nil {
+		a.registerMu.Lock()
+		a.registerActive = false
+		a.registerPhase = ""
+		a.registerMu.Unlock()
 		return RegisterNodeResult{Error: err.Error()}
 	}
 
 	ctx, cancel := context.WithCancel(a.ctx)
-	defer cancel()
 
 	server, callbackURL, err := authserver.Start(ctx, a.webClient.BaseURL)
 	if err != nil {
+		cancel()
+		a.registerMu.Lock()
+		a.registerActive = false
+		a.registerPhase = ""
+		a.registerMu.Unlock()
 		return RegisterNodeResult{Error: err.Error()}
 	}
 
@@ -307,52 +426,18 @@ func (a *App) RegisterNode(nodeName string) RegisterNodeResult {
 		generated.PublicKey,
 	)
 	runtime.BrowserOpenURL(a.ctx, authURL)
+	a.setRegisterPhase("waiting_wallet")
 
-	result, err := server.WaitResult(3 * time.Minute)
-	if err != nil {
-		return RegisterNodeResult{Error: err.Error(), AuthURL: authURL}
-	}
-	if result.Wallet != wallet {
-		return RegisterNodeResult{Error: "Signed wallet does not match the desktop session.", AuthURL: authURL}
-	}
-
-	_, err = a.webClient.RegisterNode(nodeweb.RegisterNodeRequest{
-		NodeID:              generated.NodeID,
-		NodeName:            generated.NodeName,
-		PublicKey:           generated.PublicKey,
-		ChallengeToken:      result.ChallengeToken,
-		Wallet:              result.Wallet,
-		SignatureBase64:     result.SignatureBase64,
-		Message:             result.Message,
-		SignedMessageBase64: result.SignedMessageBase64,
-	})
-	if err != nil {
-		return RegisterNodeResult{Error: err.Error(), AuthURL: authURL}
-	}
-
-	onboarding, err := a.webClient.GetOnboardingConfig()
-	if err != nil {
-		return RegisterNodeResult{Error: err.Error(), AuthURL: authURL}
-	}
-
-	nodeWebURL := onboarding.NodeWebURL
-	if nodeWebURL == "" {
-		nodeWebURL = a.webClient.BaseURL
-	}
-	operatorYAML := setupfiles.BuildOperatorConfigYAML(nodeWebURL, onboarding.PingIntervalSeconds)
-	if _, err := setupfiles.EnsureSharedFiles(installDir, onboarding.NetworkConfigYaml, operatorYAML); err != nil {
-		return RegisterNodeResult{Error: err.Error(), AuthURL: authURL}
-	}
-	if err := nodeidentity.WriteFiles(installDir, generated); err != nil {
-		return RegisterNodeResult{Error: err.Error(), AuthURL: authURL}
-	}
+	go func() {
+		defer cancel()
+		a.runRegisterNodeJob(server, generated, wallet, installDir, authURL)
+	}()
 
 	return RegisterNodeResult{
-		OK:        true,
-		NodeID:    generated.NodeID,
-		NodeName:  generated.NodeName,
-		PublicKey: generated.PublicKey,
-		AuthURL:   authURL,
+		OK:       true,
+		Pending:  true,
+		NodeName: generated.NodeName,
+		AuthURL:  authURL,
 	}
 }
 

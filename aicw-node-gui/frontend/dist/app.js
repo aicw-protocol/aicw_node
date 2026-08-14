@@ -9,6 +9,8 @@ const state = {
   showRegisterModal: false,
   registerNodeName: "",
   registerBusy: false,
+  registerPhase: "",
+  registerRecoveryTimer: null,
   stopConfirmNode: null,
   stopBusy: false,
   unstakeConfirmNode: null,
@@ -77,6 +79,80 @@ function setTabBar(visible) {
   });
 }
 
+function registerPhaseLabel(phase) {
+  switch (phase) {
+    case "waiting_wallet":
+      return "Complete the wallet sign-in in your browser, then return to this app.";
+    case "registering":
+      return "Registering on the AICW network…";
+    case "configuring":
+      return "Saving identity and config files on this computer…";
+    default:
+      return "Working…";
+  }
+}
+
+function clearRegisterRecoveryPoll() {
+  if (state.registerRecoveryTimer) {
+    clearInterval(state.registerRecoveryTimer);
+    state.registerRecoveryTimer = null;
+  }
+}
+
+function finishRegisterFlow(result) {
+  clearRegisterRecoveryPoll();
+  state.registerBusy = false;
+  state.registerPhase = "";
+  if (!result?.ok) {
+    alert(result?.error || "Node registration failed");
+    renderDashboardShell();
+    return;
+  }
+  state.showRegisterModal = false;
+  if (result.nodeName) {
+    state.expandedNodes[result.nodeName] = true;
+  }
+  state.tab = "logs";
+  renderDashboardShell();
+  void refreshDashboard();
+}
+
+function startRegisterRecoveryPoll(nodeName) {
+  clearRegisterRecoveryPoll();
+  state.registerRecoveryTimer = setInterval(async () => {
+    if (!state.registerBusy) {
+      clearRegisterRecoveryPoll();
+      return;
+    }
+    try {
+      const dashboard = await call("GetDashboard");
+      const node = (dashboard.nodes || []).find(
+        (entry) =>
+          entry.nodeName === nodeName &&
+          entry.webStatus !== "local_only" &&
+          entry.localReady,
+      );
+      if (node) {
+        finishRegisterFlow({ ok: true, nodeName: node.nodeName, nodeId: node.nodeId });
+      }
+    } catch {
+      // Ignore transient dashboard errors while registration finishes.
+    }
+  }, 2500);
+}
+
+function bindRegisterEvents() {
+  const runtime = window.runtime;
+  if (!runtime?.EventsOn) return;
+  runtime.EventsOn("register:phase", (phase) => {
+    if (!state.registerBusy) return;
+    state.registerPhase = phase;
+    renderDashboardShell();
+  });
+  runtime.EventsOn("register:finished", (result) => {
+    if (!state.registerBusy) return;
+    finishRegisterFlow(result);
+  });
 function webStatusLabel(status) {
   switch (status) {
     case "active":
@@ -243,6 +319,11 @@ function renderRegisterModal(dashboard) {
       ? `<p class="muted">Staking requirement not met. Open the web staking page if needed.</p>`
       : `<p class="muted">Your node identity is created locally. Private keys never leave this computer.</p>`;
 
+  const phaseMessage =
+    state.registerBusy && state.registerPhase
+      ? `<p class="register-phase muted">${escapeHtml(registerPhaseLabel(state.registerPhase))}</p>`
+      : "";
+
   return `
     <div class="modal-backdrop" id="registerModalBackdrop">
       <div class="modal">
@@ -251,6 +332,7 @@ function renderRegisterModal(dashboard) {
         ${eligibilityNote}
         <label class="field-label" for="registerNodeNameInput">Node name</label>
         <input id="registerNodeNameInput" value="${escapeHtml(state.registerNodeName)}" placeholder="e.g. my_node_01" ${disabled ? "disabled" : ""} />
+        ${phaseMessage}
         <div class="toolbar modal-actions">
           <button id="btnCancelRegister">Cancel</button>
           <button id="btnSubmitRegister" class="primary" ${disabled ? "disabled" : ""}>
@@ -448,28 +530,32 @@ function bindDashboardEvents(dashboard) {
   document.getElementById("registerNodeNameInput")?.addEventListener("input", (event) => {
     state.registerNodeName = event.target.value;
   });
-  document.getElementById("btnSubmitRegister")?.addEventListener("click", async () => {
+  document.getElementById("btnSubmitRegister").onclick = async () => {
     syncRegisterNodeNameFromDom();
     const nodeName = state.registerNodeName.trim();
     if (!nodeName) {
       alert("Enter a node name.");
       return;
     }
+    if (state.registerBusy) return;
     state.registerBusy = true;
+    state.registerPhase = "waiting_wallet";
     state.registerNodeName = nodeName;
     renderDashboardShell();
-    const result = await call("RegisterNode", nodeName);
-    state.registerBusy = false;
-    if (!result.ok) {
-      alert(result.error || "Node registration failed");
+    startRegisterRecoveryPoll(nodeName);
+    try {
+      const result = await call("RegisterNode", nodeName);
+      if (!result?.pending) {
+        finishRegisterFlow(result);
+      }
+    } catch (error) {
+      clearRegisterRecoveryPoll();
+      state.registerBusy = false;
+      state.registerPhase = "";
+      alert(String(error));
       renderDashboardShell();
-      return;
     }
-    state.showRegisterModal = false;
-    state.expandedNodes[result.nodeName] = true;
-    state.tab = "logs";
-    await refreshDashboard();
-  });
+  };
 
   document.getElementById("btnBrowserSignIn")?.addEventListener("click", async () => {
     const result = await call("SignInWithBrowser");
@@ -611,6 +697,7 @@ function render() {
 
 async function boot() {
   try {
+    bindRegisterEvents();
     const bootstrap = await call("GetBootstrap");
     state.installDir = bootstrap.installDir || bootstrap.defaultInstallDir;
     document.getElementById("versionLabel").textContent = `v${bootstrap.version}`;
