@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/aicw/aicw_node/aicw-node-gui/internal/install"
 )
+
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 const MaxConcurrentNodes = 5
 
@@ -246,7 +249,7 @@ func (m *Manager) Start(installDir, nodeName string) error {
 
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = installDir
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), "NO_COLOR=1")
 	configureHiddenProcess(cmd)
 
 	stdout, err := cmd.StdoutPipe()
@@ -290,8 +293,16 @@ func (m *Manager) Start(installDir, nodeName string) error {
 func (m *Manager) consume(nodeName string, reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
-		m.appendLog(nodeName, scanner.Text())
+		line := strings.TrimSpace(stripANSI(scanner.Text()))
+		if line == "" {
+			continue
+		}
+		m.appendLog(nodeName, line)
 	}
+}
+
+func stripANSI(s string) string {
+	return ansiEscape.ReplaceAllString(s, "")
 }
 
 func (m *Manager) Stop(installDir, nodeName string) error {

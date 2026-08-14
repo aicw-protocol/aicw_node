@@ -8,8 +8,8 @@
 #   GOOS=darwin GOARCH=universal ./scripts/build-gui.sh   # macOS only
 #
 # Output (dist/):
-#   aicw-node-<platform>
-#   aicw-node-setup-<platform>   (.app.zip on darwin universal)
+#   aicw-node-setup-<platform>.zip   (Windows/Linux)
+#   aicw-node-setup-darwin-universal.app.zip
 
 set -euo pipefail
 
@@ -40,10 +40,10 @@ node_dist_name="aicw-node-${setup_suffix}"
 setup_dist_name="aicw-node-setup-${setup_suffix}"
 if [ "$GOOS" = "darwin" ] && [ "$GOARCH" = "universal" ]; then
   node_dist_name="aicw-node-darwin-universal"
+  setup_dist_name="aicw-node-setup-darwin-universal.app.zip"
 fi
 
 NODE_LOCAL="$GUI_DIR/$node_local_name"
-NODE_DIST="$DIST_DIR/$node_dist_name"
 SETUP_DIST="$DIST_DIR/$setup_dist_name"
 
 echo "==> Building aicw-node (${platform})"
@@ -124,17 +124,30 @@ else
 fi
 popd >/dev/null
 
-cp "$NODE_LOCAL" "$NODE_DIST"
-chmod +x "$NODE_DIST" 2>/dev/null || true
-
-# Ship engine next to GUI installer (same folder as release downloads / zip contents).
+# Bundled node engine sits next to the GUI installer (used by local dev + release zips).
 bundled_engine="$DIST_DIR/$node_local_name"
 cp "$NODE_LOCAL" "$bundled_engine"
 chmod +x "$bundled_engine" 2>/dev/null || true
 
+if [ "$GOOS" = "windows" ] && [ "$TARGET_GOARCH" = "amd64" ]; then
+  win_zip="$DIST_DIR/aicw-node-setup-windows-amd64.zip"
+  if command -v zip >/dev/null 2>&1; then
+    (cd "$DIST_DIR" && zip -j -q "$win_zip" \
+      "aicw-node-setup-windows-amd64.exe" "$node_local_name")
+  elif command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -Command \
+      "Compress-Archive -Path '$SETUP_DIST','$bundled_engine' -DestinationPath '$win_zip' -Force"
+  else
+    echo "zip or powershell required to package Windows release" >&2
+    exit 1
+  fi
+elif [ "$GOOS" = "linux" ] && [ "$TARGET_GOARCH" = "amd64" ]; then
+  (cd "$DIST_DIR" && zip -j -q "aicw-node-setup-linux-amd64.zip" \
+    "aicw-node-setup-linux-amd64" "$node_local_name")
+fi
+
 # Convenience copies for native dev builds
 if [ "$GOOS" = "$(go env GOOS)" ] && [ "$TARGET_GOARCH" = "$(go env GOARCH)" ]; then
-  cp "$NODE_DIST" "$DIST_DIR/aicw-node" 2>/dev/null || cp "$NODE_DIST" "$DIST_DIR/aicw-node.exe" 2>/dev/null || true
   if [ "$GOOS" != "darwin" ] || [ "$TARGET_GOARCH" != "universal" ]; then
     cp "$SETUP_DIST" "$DIST_DIR/aicw-node-setup" 2>/dev/null || cp "$SETUP_DIST" "$DIST_DIR/aicw-node-setup.exe" 2>/dev/null || true
   fi
@@ -142,5 +155,10 @@ fi
 
 echo ""
 echo "Done:"
-echo "  $NODE_DIST"
 echo "  $SETUP_DIST"
+if [ -f "$DIST_DIR/aicw-node-setup-windows-amd64.zip" ]; then
+  echo "  $DIST_DIR/aicw-node-setup-windows-amd64.zip"
+fi
+if [ -f "$DIST_DIR/aicw-node-setup-linux-amd64.zip" ]; then
+  echo "  $DIST_DIR/aicw-node-setup-linux-amd64.zip"
+fi

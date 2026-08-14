@@ -9,9 +9,10 @@ $Goarch = "amd64"
 New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
 
 $NodeLocal = Join-Path $GuiDir "aicw-node.exe"
-$NodeDist = Join-Path $DistDir "aicw-node-windows-amd64.exe"
 $SetupDist = Join-Path $DistDir "aicw-node-setup-windows-amd64.exe"
 $SetupLocal = Join-Path $DistDir "aicw-node-setup.exe"
+$EngineDist = Join-Path $DistDir "aicw-node.exe"
+$ZipDist = Join-Path $DistDir "aicw-node-setup-windows-amd64.zip"
 
 Write-Host "Building aicw-node.exe..."
 Push-Location $Root
@@ -39,12 +40,13 @@ $env:GOARCH = $Goarch
 go build -tags production -trimpath -ldflags="-H windowsgui -s -w" -o $SetupDist .
 Pop-Location
 
-Copy-Item $NodeLocal $NodeDist -Force
+Copy-Item $NodeLocal $EngineDist -Force
 Copy-Item $SetupDist $SetupLocal -Force
-Copy-Item $NodeLocal (Join-Path $DistDir "aicw-node.exe") -Force
+
+if (Test-Path $ZipDist) { Remove-Item $ZipDist -Force }
+Compress-Archive -Path $SetupDist, $EngineDist -DestinationPath $ZipDist -Force
 
 Write-Host "Done:"
-Write-Host "  $SetupDist"
+Write-Host "  $ZipDist"
 Write-Host "  $SetupLocal"
-Write-Host "  $NodeDist"
-Write-Host "  $(Join-Path $DistDir 'aicw-node.exe')"
+Write-Host "  $EngineDist"

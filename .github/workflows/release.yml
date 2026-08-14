@@ -9,59 +9,6 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            suffix: linux-amd64
-          - goos: linux
-            goarch: arm64
-            suffix: linux-arm64
-          - goos: windows
-            goarch: amd64
-            suffix: windows-amd64
-            ext: .exe
-          - goos: darwin
-            goarch: amd64
-            suffix: darwin-amd64
-          - goos: darwin
-            goarch: arm64
-            suffix: darwin-arm64
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: aicw_node
-
-      - uses: actions/checkout@v4
-        with:
-          repository: aicw-protocol/mpcium
-          path: mpcium
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: aicw_node/go.mod
-
-      - name: Build aicw-node CLI
-        working-directory: aicw_node
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: |
-          mkdir -p dist
-          go build -trimpath -ldflags="-s -w" \
-            -o "dist/aicw-node-${{ matrix.suffix }}${{ matrix.ext }}" \
-            ./cmd/aicw-node
-
-      - name: Upload CLI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: aicw-node-${{ matrix.suffix }}
-          path: aicw_node/dist/aicw-node-${{ matrix.suffix }}${{ matrix.ext }}
-
   build-gui:
     strategy:
       fail-fast: false
@@ -99,7 +46,7 @@ jobs:
         working-directory: aicw_node
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev zip
 
       - name: Build GUI
         working-directory: aicw_node
@@ -116,11 +63,11 @@ jobs:
         with:
           name: aicw-node-gui-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
-            aicw_node/dist/aicw-node-setup-*
-            aicw_node/dist/aicw-node-*
+            aicw_node/dist/aicw-node-setup-*.zip
+            aicw_node/dist/aicw-node-setup-darwin-universal.app.zip
 
   release:
-    needs: [build, build-gui]
+    needs: [build-gui]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -130,27 +77,16 @@ jobs:
 
       - name: Flatten nested artifact paths
         run: |
-          # merge-multiple may place some files directly under dist/; only hoist nested copies.
-          find dist -mindepth 2 -type f -name 'aicw-node-*' -exec cp -t dist/ {} +
+          find dist -mindepth 2 -type f -name 'aicw-node-setup-*' -exec cp -t dist/ {} +
           find dist -mindepth 2 -type f -delete 2>/dev/null || true
           find dist -mindepth 2 -type d -empty -delete 2>/dev/null || true
           ls -la dist/
 
-      - name: Package GUI download zips
-        run: |
-          cd dist
-          if [ -f aicw-node-setup-windows-amd64.exe ]; then
-            engine="aicw-node.exe"
-            [ -f "$engine" ] || cp aicw-node-windows-amd64.exe "$engine"
-            zip -j aicw-node-setup-windows-amd64.zip aicw-node-setup-windows-amd64.exe "$engine"
-          fi
-          if [ -f aicw-node-setup-linux-amd64 ]; then
-            zip -j aicw-node-setup-linux-amd64.zip aicw-node-setup-linux-amd64 aicw-node-linux-amd64
-          fi
-          ls -la
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: |
+            dist/aicw-node-setup-windows-amd64.zip
+            dist/aicw-node-setup-linux-amd64.zip
+            dist/aicw-node-setup-darwin-universal.app.zip
           generate_release_notes: true

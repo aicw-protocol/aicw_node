@@ -16,13 +16,15 @@ The web dashboard is for **staking, status, offboard/unstake, and rewards**. Nod
 
 ## Release downloads
 
-| Platform | GUI file | Bundled engine |
-|----------|----------|----------------|
-| Windows | `aicw-node-setup-windows-amd64.exe` | `aicw-node-windows-amd64.exe` |
-| Linux | `aicw-node-setup-linux-amd64` | `aicw-node-linux-amd64` |
-| macOS | `aicw-node-setup-darwin-universal.app.zip` | `aicw-node-darwin-universal` |
+Each release ships **one file per platform**:
 
-Local dev builds also write convenience names: `dist/aicw-node-setup.exe`, `dist/aicw-node-setup`, etc.
+| Platform | Download | What's inside |
+|----------|----------|---------------|
+| Windows | `aicw-node-setup-windows-amd64.zip` | GUI setup + `aicw-node.exe` |
+| Linux | `aicw-node-setup-linux-amd64.zip` | GUI app + `aicw-node` engine |
+| macOS | `aicw-node-setup-darwin-universal.app.zip` | `AICW Node.app` (engine bundled inside) |
+
+Local dev builds also write convenience names: `dist/aicw-node-setup.exe`, `dist/aicw-node.exe`.
 
 ## Install folders
 
