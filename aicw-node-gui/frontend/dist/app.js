@@ -642,13 +642,15 @@ function bindDashboardEvents(dashboard) {
     };
   });
   document.querySelectorAll(".btn-stop-node").forEach((btn) => {
-    btn.onclick = () => {
+    btn.onclick = (event) => {
+      event.stopPropagation();
       state.stopConfirmNode = btn.dataset.node;
       renderDashboardShell();
     };
   });
   document.querySelectorAll(".btn-unstake-node").forEach((btn) => {
-    btn.onclick = () => {
+    btn.onclick = (event) => {
+      event.stopPropagation();
       state.unstakeConfirmNode = btn.dataset.node;
       renderDashboardShell();
     };
