@@ -46,14 +46,19 @@ InstallDir "$LOCALAPPDATA\Programs\AICW Node"
 ShowInstDetails show
 
 Function CloseAICWProcesses
- nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /IM aicw-node-setup.exe /T'
- nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /IM aicw-node.exe /T'
+ ; Ignore "process not found" from taskkill; it is not an install failure.
+ nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /F /IM aicw-node-setup.exe /T'
+ Pop $0
+ nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /F /IM aicw-node.exe /T'
+ Pop $0
  Sleep 1500
 FunctionEnd
 
 Function un.CloseAICWProcesses
- nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /IM aicw-node-setup.exe /T'
- nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /IM aicw-node.exe /T'
+ nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /F /IM aicw-node-setup.exe /T'
+ Pop $0
+ nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /F /IM aicw-node.exe /T'
+ Pop $0
  Sleep 1500
 FunctionEnd
 
