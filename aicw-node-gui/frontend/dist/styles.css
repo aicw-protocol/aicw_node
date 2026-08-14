@@ -316,10 +316,11 @@ button.danger:not(:disabled):hover {
   justify-content: flex-end;
 }
 
-.node-quick-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
+.node-actions {
+  margin: 0;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--border);
+  background: white;
 }
 
 .badge {

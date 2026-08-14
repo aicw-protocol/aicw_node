@@ -327,10 +327,11 @@ function renderNodeItem(node, dashboard) {
         <span class="node-chevron">${expanded ? "▾" : "▸"}</span>
         <span class="node-title">${escapeHtml(node.nodeName)}</span>
         <div class="node-badges">${badges.join("")}</div>
-        <div class="node-quick-actions">
-          <button class="primary btn-start-node" data-node="${escapeHtml(node.nodeName)}" ${canStart ? "" : "disabled"} title="${escapeHtml(blockReason || "Start this node")}">Start</button>
-          <button class="btn-stop-node" data-node="${escapeHtml(node.nodeName)}" ${canStop ? "" : "disabled"}>Stop</button>
-        </div>
+      </div>
+      <div class="toolbar node-actions">
+        <button class="primary btn-start-node" data-node="${escapeHtml(node.nodeName)}" ${canStart ? "" : "disabled"} title="${escapeHtml(blockReason || "Start this node")}">Start</button>
+        <button class="btn-stop-node" data-node="${escapeHtml(node.nodeName)}" ${canStop ? "" : "disabled"}>Stop</button>
+        <button class="btn-unstake-node" data-node="${escapeHtml(node.nodeName)}" ${canUnstake ? "" : "disabled"}>Unstake</button>
       </div>
       <div class="node-details ${expanded ? "open" : ""}">
         <div class="node-meta">
@@ -339,9 +340,6 @@ function renderNodeItem(node, dashboard) {
         </div>
         ${missing}
         ${blockReason && !node.processRunning ? `<p class="muted">${escapeHtml(blockReason)}</p>` : ""}
-        <div class="toolbar">
-          <button class="btn-unstake-node" data-node="${escapeHtml(node.nodeName)}" ${canUnstake ? "" : "disabled"}>Unstake</button>
-        </div>
       </div>
     </article>`;
 }
@@ -533,9 +531,6 @@ function bindDashboardEvents(dashboard) {
       state.expandedNodes[name] = !(state.expandedNodes[name] ?? true);
       renderDashboardShell();
     };
-  });
-  document.querySelectorAll(".node-quick-actions").forEach((el) => {
-    el.addEventListener("click", (event) => event.stopPropagation());
   });
 
   document.getElementById("logNodeFilter")?.addEventListener("change", (event) => {
