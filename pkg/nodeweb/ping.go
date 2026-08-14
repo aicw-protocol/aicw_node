@@ -5,6 +5,8 @@ package nodeweb
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,7 +31,13 @@ type Config struct {
 }
 
 type pingRequest struct {
-	NodeID string `json:"nodeId"`
+	NodeID          string `json:"nodeId"`
+	Timestamp       string `json:"timestamp"`
+	SignatureBase64 string `json:"signatureBase64"`
+}
+
+func buildNodePingMessage(nodeID, timestamp string) string {
+	return fmt.Sprintf("AICW Node Ping\nNode ID: %s\nTimestamp: %s", nodeID, timestamp)
 }
 
 // PingEndpoint builds the full ping URL from a configured base URL.
@@ -37,16 +45,27 @@ func PingEndpoint(baseURL string) string {
 	return strings.TrimRight(strings.TrimSpace(baseURL), "/") + pingPath
 }
 
-// SendPing posts a single ping for nodeID. Errors are returned to the caller.
-func SendPing(ctx context.Context, client *http.Client, baseURL, nodeID string) error {
+// SendPing posts a signed ping for nodeID. Errors are returned to the caller.
+func SendPing(ctx context.Context, client *http.Client, baseURL, nodeID string, privateKey ed25519.PrivateKey) error {
 	if strings.TrimSpace(baseURL) == "" {
 		return fmt.Errorf("node web base URL is empty")
 	}
 	if strings.TrimSpace(nodeID) == "" {
 		return fmt.Errorf("node ID is empty")
 	}
+	if len(privateKey) != ed25519.PrivateKeySize {
+		return fmt.Errorf("invalid node private key for ping signing")
+	}
 
-	body, err := json.Marshal(pingRequest{NodeID: nodeID})
+	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
+	message := buildNodePingMessage(nodeID, timestamp)
+	signature := ed25519.Sign(privateKey, []byte(message))
+
+	body, err := json.Marshal(pingRequest{
+		NodeID:          nodeID,
+		Timestamp:       timestamp,
+		SignatureBase64: base64.StdEncoding.EncodeToString(signature),
+	})
 	if err != nil {
 		return fmt.Errorf("marshal ping body: %w", err)
 	}
@@ -82,7 +101,7 @@ func SendPing(ctx context.Context, client *http.Client, baseURL, nodeID string) 
 
 // StartPeriodicPing runs ping in the background until ctx is cancelled.
 // Returns a stop function (no-op when disabled). Ping failures are logged only.
-func StartPeriodicPing(ctx context.Context, nodeID string, cfg Config) func() {
+func StartPeriodicPing(ctx context.Context, nodeID string, privateKey ed25519.PrivateKey, cfg Config) func() {
 	if !cfg.Enabled {
 		return func() {}
 	}
@@ -92,6 +111,10 @@ func StartPeriodicPing(ctx context.Context, nodeID string, cfg Config) func() {
 	}
 	if strings.TrimSpace(nodeID) == "" {
 		logger.Warn("node web ping disabled: node ID is empty")
+		return func() {}
+	}
+	if len(privateKey) != ed25519.PrivateKeySize {
+		logger.Warn("node web ping disabled: invalid private key for signing")
 		return func() {}
 	}
 
@@ -113,7 +136,7 @@ func StartPeriodicPing(ctx context.Context, nodeID string, cfg Config) func() {
 	)
 
 	send := func() {
-		if err := SendPing(pingCtx, client, cfg.BaseURL, nodeID); err != nil {
+		if err := SendPing(pingCtx, client, cfg.BaseURL, nodeID, privateKey); err != nil {
 			logger.Warn("Node web ping failed", "nodeID", nodeID, "error", err)
 			return
 		}

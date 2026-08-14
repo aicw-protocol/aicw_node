@@ -20,7 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const guiVersion = "0.1.26-gui"
+const guiVersion = "0.1.27-gui"
 
 type Session struct {
 	Wallet    string `json:"wallet"`
@@ -891,14 +891,22 @@ func (a *App) UnstakeNode(nodeName string) UnstakeNodeResult {
 		return UnstakeNodeResult{Error: "Select a node to unstake."}
 	}
 
-	wallet := a.sessionWallet()
+	a.mu.Lock()
+	wallet := ""
+	verified := false
+	if a.session != nil {
+		wallet = a.session.Wallet
+		verified = a.session.Verified
+	}
+	installDir := a.installDir
+	a.mu.Unlock()
+
 	if wallet == "" {
 		return UnstakeNodeResult{Error: "Sign in with your wallet first."}
 	}
-
-	a.mu.Lock()
-	installDir := a.installDir
-	a.mu.Unlock()
+	if !verified {
+		return UnstakeNodeResult{Error: "Use Sign in with Browser so your wallet is verified before unstaking a node."}
+	}
 
 	view := a.GetDashboard()
 	if !view.OK && view.Error != "" {
@@ -923,8 +931,8 @@ func (a *App) UnstakeNode(nodeName string) UnstakeNodeResult {
 	}
 	if view.Offboard != nil && view.Offboard.PendingUnstake {
 		return UnstakeNodeResult{
-			Error: "An unstake is already in progress for this wallet.",
-			Phase: "already_pending",
+			Error:   "An unstake is already in progress for this wallet.",
+			Phase:   "already_pending",
 			Message: view.Offboard.ReturnAvailableAt,
 		}
 	}
@@ -933,14 +941,45 @@ func (a *App) UnstakeNode(nodeName string) UnstakeNodeResult {
 		if err := a.nodeProc.Stop(installDir, nodeName); err != nil {
 			return UnstakeNodeResult{Error: fmt.Sprintf("Failed to stop node: %v", err)}
 		}
-		time.Sleep(2 * time.Second)
+	}
+
+	if err := a.webClient.WaitForNodeInactive(target.NodeID, 6*time.Minute); err != nil {
+		return UnstakeNodeResult{Error: err.Error()}
+	}
+
+	ctx, cancel := context.WithCancel(a.ctx)
+	defer cancel()
+
+	server, callbackURL, err := authserver.Start(ctx, a.webClient.BaseURL)
+	if err != nil {
+		return UnstakeNodeResult{Error: err.Error()}
+	}
+
+	authURL := nodeweb.AuthActionURL(
+		a.webClient.BaseURL,
+		callbackURL,
+		"offboard",
+		target.NodeID,
+		nodeName,
+	)
+	runtime.BrowserOpenURL(a.ctx, authURL)
+
+	result, err := server.WaitResult(3 * time.Minute)
+	if err != nil {
+		return UnstakeNodeResult{Error: err.Error(), Message: authURL}
+	}
+	if result.Wallet != wallet {
+		return UnstakeNodeResult{Error: "Signed wallet does not match the desktop session."}
 	}
 
 	resp, err := a.webClient.OffboardNode(nodeweb.OffboardNodeRequest{
-		Wallet:         wallet,
-		NodeID:         target.NodeID,
-		NodeName:       nodeName,
-		ProcessStopped: true,
+		Wallet:              result.Wallet,
+		NodeID:              target.NodeID,
+		NodeName:            nodeName,
+		ChallengeToken:      result.ChallengeToken,
+		SignatureBase64:     result.SignatureBase64,
+		Message:             result.Message,
+		SignedMessageBase64: result.SignedMessageBase64,
 	})
 	if err != nil {
 		return UnstakeNodeResult{Error: err.Error()}
@@ -951,15 +990,15 @@ func (a *App) UnstakeNode(nodeName string) UnstakeNodeResult {
 	}
 	_ = a.webClient.LogLocalIdentityRemoved(wallet, target.NodeID, nodeName)
 
-	result := UnstakeNodeResult{
+	unstakeResult := UnstakeNodeResult{
 		OK:      true,
 		Phase:   resp.Phase,
 		Message: resp.Message,
 	}
 	if resp.ReturnAvailableAt != nil {
-		result.ReturnAvailableAt = *resp.ReturnAvailableAt
+		unstakeResult.ReturnAvailableAt = *resp.ReturnAvailableAt
 	}
-	return result
+	return unstakeResult
 }
 
 func (a *App) IsNodeRunning() bool {

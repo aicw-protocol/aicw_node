@@ -13,6 +13,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"net"
 	"os"
@@ -420,7 +421,7 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	logger.Info("Starting consumers", "nodeID", nodeID)
 	appContext, cancel := context.WithCancel(context.Background())
 
-	stopNodeWebPing := nodeweb.StartPeriodicPing(appContext, nodeID, nodeweb.Config{
+	stopNodeWebPing := nodeweb.StartPeriodicPing(appContext, nodeID, ed25519.PrivateKey(privateKey), nodeweb.Config{
 		Enabled:         viper.GetBool("node_web.ping_enabled"),
 		BaseURL:         viper.GetString("node_web.url"),
 		IntervalSeconds: viper.GetInt("node_web.ping_interval_seconds"),

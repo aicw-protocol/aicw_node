@@ -137,6 +137,19 @@ func AuthRegisterURL(baseURL, callbackURL, nodeID, nodeName, publicKey string) s
 	return fmt.Sprintf("%s/auth/gui?%s", strings.TrimRight(baseURL, "/"), params.Encode())
 }
 
+func AuthActionURL(baseURL, callbackURL, purpose, nodeID, nodeName string) string {
+	params := url.Values{}
+	params.Set("callback", callbackURL)
+	params.Set("purpose", purpose)
+	if strings.TrimSpace(nodeID) != "" {
+		params.Set("nodeId", nodeID)
+	}
+	if strings.TrimSpace(nodeName) != "" {
+		params.Set("nodeName", nodeName)
+	}
+	return fmt.Sprintf("%s/auth/gui?%s", strings.TrimRight(baseURL, "/"), params.Encode())
+}
+
 type OnboardingConfig struct {
 	NodeWebURL          string `json:"nodeWebUrl"`
 	PingIntervalSeconds int    `json:"pingIntervalSeconds"`
@@ -246,6 +259,30 @@ func (c *Client) GetActiveNodeIDs() (map[string]bool, error) {
 	return active, nil
 }
 
+func (c *Client) WaitForNodeInactive(nodeID string, timeout time.Duration) error {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return fmt.Errorf("node ID is required")
+	}
+
+	deadline := time.Now().Add(timeout)
+	for {
+		active, err := c.GetActiveNodeIDs()
+		if err != nil {
+			return err
+		}
+		if !active[nodeID] {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf(
+				"node still active on the network after stop; wait a few minutes and try again",
+			)
+		}
+		time.Sleep(10 * time.Second)
+	}
+}
+
 func NodeRecordName(node NodeRecord) string {
 	if node.NodeName != nil && strings.TrimSpace(*node.NodeName) != "" {
 		return strings.TrimSpace(*node.NodeName)
@@ -254,10 +291,13 @@ func NodeRecordName(node NodeRecord) string {
 }
 
 type OffboardNodeRequest struct {
-	Wallet          string `json:"wallet"`
-	NodeID          string `json:"nodeId"`
-	NodeName        string `json:"nodeName,omitempty"`
-	ProcessStopped  bool   `json:"processStopped"`
+	Wallet              string `json:"wallet"`
+	NodeID              string `json:"nodeId"`
+	NodeName            string `json:"nodeName,omitempty"`
+	ChallengeToken      string `json:"challengeToken"`
+	SignatureBase64     string `json:"signatureBase64"`
+	Message             string `json:"message"`
+	SignedMessageBase64 string `json:"signedMessageBase64,omitempty"`
 }
 
 type OffboardNodeResponse struct {
