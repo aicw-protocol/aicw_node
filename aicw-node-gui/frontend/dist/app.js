@@ -624,11 +624,21 @@ function bindDashboardEvents(dashboard) {
   });
 
   document.querySelectorAll(".btn-start-node").forEach((btn) => {
-    btn.onclick = async () => {
-      const result = await call("StartNode", btn.dataset.node);
-      if (!result.ok) alert(result.error || "Failed to start node");
-      state.tab = "logs";
-      await refreshDashboard();
+    btn.onclick = async (event) => {
+      event.stopPropagation();
+      try {
+        const result = await call("StartNode", btn.dataset.node);
+        if (!result.ok) {
+          alert(result.error || "Failed to start node");
+          await refreshDashboard();
+          return;
+        }
+        state.tab = "logs";
+        await refreshDashboard();
+      } catch (err) {
+        alert("Start failed: " + String(err));
+        await refreshDashboard();
+      }
     };
   });
   document.querySelectorAll(".btn-stop-node").forEach((btn) => {

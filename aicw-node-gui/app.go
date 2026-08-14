@@ -20,7 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const guiVersion = "0.1.17-gui"
+const guiVersion = "0.1.18-gui"
 
 type Session struct {
 	Wallet    string `json:"wallet"`
@@ -811,7 +811,15 @@ func (a *App) StartNode(nodeName string) NodeActionResult {
 
 	a.mu.Lock()
 	installDir := a.installDir
+	wallet := ""
+	if a.session != nil {
+		wallet = a.session.Wallet
+	}
 	a.mu.Unlock()
+
+	if wallet == "" {
+		return NodeActionResult{Error: "Sign in with your wallet first."}
+	}
 
 	if a.nodeProc.IsNodeRunning(installDir, nodeName) {
 		return NodeActionResult{OK: true}
@@ -820,30 +828,21 @@ func (a *App) StartNode(nodeName string) NodeActionResult {
 		return NodeActionResult{Error: fmt.Sprintf("Maximum %d nodes can run at once.", nodeprocess.MaxConcurrentNodes)}
 	}
 
-	if a.sessionWallet() == "" {
-		return NodeActionResult{Error: "Sign in with your wallet first."}
+	// Validate locally without a network round-trip so Start is instant.
+	shared := install.InspectSharedSetup(installDir)
+	local, _ := install.InspectNodeLocalSetup(installDir, nodeName)
+	if local == nil || local.NodeName == "" {
+		return NodeActionResult{Error: "Node not found locally. Register it in this app first."}
 	}
-
-	view := a.GetDashboard()
-	if !view.OK && view.Error != "" {
-		return NodeActionResult{Error: view.Error}
+	if !shared.NodeBinaryPresent {
+		return NodeActionResult{Error: "Node binary missing. Click Repair Binary to restore it."}
 	}
-
-	var target *NodeRowView
-	for i := range view.Nodes {
-		if view.Nodes[i].NodeName == nodeName {
-			target = &view.Nodes[i]
-			break
+	if !local.ReadyToStart {
+		missing := strings.Join(local.MissingItems, ", ")
+		if missing == "" {
+			missing = "identity or config files"
 		}
-	}
-	if target == nil {
-		return NodeActionResult{Error: "Node not found. Register it in this app or on the web dashboard first."}
-	}
-	if target.WebStatus == "local_only" {
-		return NodeActionResult{Error: "Register this node before starting it."}
-	}
-	if !target.LocalReady {
-		return NodeActionResult{Error: "Local files missing for this node. Use Generate Config Files or register the node again from this app."}
+		return NodeActionResult{Error: "Cannot start: missing " + missing + ". Use Generate Config Files or re-register this node."}
 	}
 
 	if err := a.nodeProc.Start(installDir, nodeName); err != nil {
