@@ -20,11 +20,13 @@ Each release ships **one file per platform**:
 
 | Platform | Download | What's inside |
 |----------|----------|---------------|
-| Windows | `aicw-node-setup-windows-amd64.zip` | GUI setup + `aicw-node.exe` |
+| Windows | `aicw-node-setup-windows-amd64-installer.exe` | NSIS installer (Programs and Features uninstall) + GUI + `aicw-node.exe` |
 | Linux | `aicw-node-setup-linux-amd64.zip` | GUI app + `aicw-node` engine |
 | macOS | `aicw-node-setup-darwin-universal.app.zip` | `AICW Node.app` (engine bundled inside) |
 
-Local dev builds also write convenience names: `dist/aicw-node-setup.exe`, `dist/aicw-node.exe`.
+Windows installs to `%LOCALAPPDATA%\Programs\AICW Node\` and registers under **Settings → Apps → Installed apps → AICW Node**.
+
+Local dev builds also write `dist/aicw-node-setup-windows-amd64-installer.exe`.
 
 ## Install folders
 
@@ -38,7 +40,7 @@ Local dev builds also write convenience names: `dist/aicw-node-setup.exe`, `dist
 
 ### Windows
 
-Requirements: Go 1.25+, WebView2, CGO enabled.
+Requirements: Go 1.25+, WebView2, [NSIS](https://nsis.sourceforge.io/), CGO enabled.
 
 ```powershell
 ./scripts/build-gui.ps1

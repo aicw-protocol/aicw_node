@@ -8,8 +8,9 @@
 #   GOOS=darwin GOARCH=universal ./scripts/build-gui.sh   # macOS only
 #
 # Output (dist/):
-#   aicw-node-setup-<platform>.zip   (Windows/Linux)
-#   aicw-node-setup-darwin-universal.app.zip
+#   Windows: aicw-node-setup-windows-amd64-installer.exe (NSIS, Programs and Features)
+#   Linux:   aicw-node-setup-linux-amd64.zip
+#   macOS:   aicw-node-setup-darwin-universal.app.zip
 
 set -euo pipefail
 
@@ -25,6 +26,7 @@ TARGET_GOARCH="$GOARCH"
 node_local_name="aicw-node"
 setup_suffix="${GOOS}-${GOARCH}"
 platform="${GOOS}/${GOARCH}"
+windows_installer_name="aicw-node-setup-windows-amd64-installer.exe"
 
 if [ "$GOOS" = "windows" ]; then
   node_local_name="aicw-node.exe"
@@ -36,15 +38,26 @@ if [ "$GOOS" = "darwin" ] && [ "$GOARCH" = "universal" ]; then
   setup_suffix="darwin-universal.app.zip"
 fi
 
-node_dist_name="aicw-node-${setup_suffix}"
 setup_dist_name="aicw-node-setup-${setup_suffix}"
 if [ "$GOOS" = "darwin" ] && [ "$GOARCH" = "universal" ]; then
-  node_dist_name="aicw-node-darwin-universal"
   setup_dist_name="aicw-node-setup-darwin-universal.app.zip"
 fi
 
 NODE_LOCAL="$GUI_DIR/$node_local_name"
 SETUP_DIST="$DIST_DIR/$setup_dist_name"
+
+if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
+  PRODUCT_VERSION="${GITHUB_REF_NAME#v}"
+  if command -v node >/dev/null 2>&1; then
+    node - "$GUI_DIR/wails.json" "$PRODUCT_VERSION" <<'EOF'
+const fs = require("fs");
+const [file, version] = process.argv.slice(2);
+const json = JSON.parse(fs.readFileSync(file, "utf8"));
+json.info.productVersion = version;
+fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
+EOF
+  fi
+fi
 
 echo "==> Building aicw-node (${platform})"
 pushd "$ROOT" >/dev/null
@@ -80,11 +93,12 @@ export CGO_ENABLED=1
 target_goarch="$TARGET_GOARCH"
 wails_build_args=(-platform "$platform" -clean -skipbindings)
 if [ "$GOOS" = "linux" ]; then
-  # Ubuntu 24.04+ ships webkit2gtk 4.1; Wails defaults to 4.0 pkg-config.
   wails_build_args+=(-tags webkit2_41)
 fi
+if [ "$GOOS" = "windows" ] && [ "$TARGET_GOARCH" = "amd64" ]; then
+  wails_build_args+=(-nsis)
+fi
 
-# Wails understands darwin/universal via -platform; GOARCH=universal breaks the Go toolchain.
 if [ "$GOOS" = "darwin" ] && [ "$target_goarch" = "universal" ]; then
   unset GOARCH
 fi
@@ -101,6 +115,13 @@ if command -v wails >/dev/null 2>&1; then
     cp "$NODE_LOCAL" "$app_path/Contents/MacOS/aicw-node"
     chmod +x "$app_path/Contents/MacOS/aicw-node" 2>/dev/null || true
     ditto -c -k --sequesterRsrc --keepParent "$app_path" "$SETUP_DIST"
+  elif [ "$GOOS" = "windows" ] && [ "$TARGET_GOARCH" = "amd64" ]; then
+    nsis_installer="build/bin/aicw-node-setup-amd64-installer.exe"
+    if [ ! -f "$nsis_installer" ]; then
+      echo "NSIS installer was not produced at $nsis_installer" >&2
+      exit 1
+    fi
+    cp "$nsis_installer" "$DIST_DIR/$windows_installer_name"
   else
     built="$(find build/bin -maxdepth 1 -type f -name 'aicw-node-setup*' -print -quit)"
     if [ -z "$built" ]; then
@@ -118,50 +139,39 @@ else
   if [ "$GOOS" = "darwin" ] && [ "$target_goarch" = "universal" ]; then
     GOARCH=arm64
   fi
+  if [ "$GOOS" = "windows" ]; then
+    ldflags="-H windowsgui -s -w"
+  fi
   GOOS="$GOOS" GOARCH="${GOARCH:-$target_goarch}" go build -tags "$go_tags" -trimpath -ldflags="$ldflags" \
     -o "$SETUP_DIST" .
   chmod +x "$SETUP_DIST"
 fi
 popd >/dev/null
 
-# Bundled node engine sits next to the GUI installer (used by local dev + release zips).
-bundled_engine="$DIST_DIR/$node_local_name"
-cp "$NODE_LOCAL" "$bundled_engine"
-chmod +x "$bundled_engine" 2>/dev/null || true
-
-if [ "$GOOS" = "windows" ] && [ "$TARGET_GOARCH" = "amd64" ]; then
-  win_zip="aicw-node-setup-windows-amd64.zip"
-  if command -v zip >/dev/null 2>&1; then
-    (cd "$DIST_DIR" && zip -j -q "$win_zip" \
-      "aicw-node-setup-windows-amd64.exe" "$node_local_name")
-  elif command -v powershell.exe >/dev/null 2>&1; then
-    (
-      cd "$DIST_DIR"
-      powershell.exe -NoProfile -Command \
-        "Compress-Archive -Path 'aicw-node-setup-windows-amd64.exe','$node_local_name' -DestinationPath '$win_zip' -Force"
-    )
-  else
-    echo "zip or powershell required to package Windows release" >&2
-    exit 1
-  fi
-elif [ "$GOOS" = "linux" ] && [ "$TARGET_GOARCH" = "amd64" ]; then
+if [ "$GOOS" = "linux" ] && [ "$TARGET_GOARCH" = "amd64" ]; then
+  bundled_engine="$DIST_DIR/$node_local_name"
+  cp "$NODE_LOCAL" "$bundled_engine"
+  chmod +x "$bundled_engine" 2>/dev/null || true
   (cd "$DIST_DIR" && zip -j -q "aicw-node-setup-linux-amd64.zip" \
     "aicw-node-setup-linux-amd64" "$node_local_name")
 fi
 
-# Convenience copies for native dev builds
 if [ "$GOOS" = "$(go env GOOS)" ] && [ "$TARGET_GOARCH" = "$(go env GOARCH)" ]; then
   if [ "$GOOS" != "darwin" ] || [ "$TARGET_GOARCH" != "universal" ]; then
-    cp "$SETUP_DIST" "$DIST_DIR/aicw-node-setup" 2>/dev/null || cp "$SETUP_DIST" "$DIST_DIR/aicw-node-setup.exe" 2>/dev/null || true
+    if [ "$GOOS" = "windows" ]; then
+      cp "$DIST_DIR/$windows_installer_name" "$DIST_DIR/aicw-node-setup.exe" 2>/dev/null || true
+    else
+      cp "$SETUP_DIST" "$DIST_DIR/aicw-node-setup" 2>/dev/null || true
+    fi
   fi
 fi
 
 echo ""
 echo "Done:"
-echo "  $SETUP_DIST"
-if [ -f "$DIST_DIR/aicw-node-setup-windows-amd64.zip" ]; then
-  echo "  $DIST_DIR/aicw-node-setup-windows-amd64.zip"
+if [ -f "$DIST_DIR/$windows_installer_name" ]; then
+  echo "  $DIST_DIR/$windows_installer_name"
 fi
+echo "  $SETUP_DIST"
 if [ -f "$DIST_DIR/aicw-node-setup-linux-amd64.zip" ]; then
   echo "  $DIST_DIR/aicw-node-setup-linux-amd64.zip"
 fi

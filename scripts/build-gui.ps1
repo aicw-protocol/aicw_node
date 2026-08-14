@@ -6,13 +6,13 @@ $DistDir = Join-Path $Root "dist"
 $Goos = "windows"
 $Goarch = "amd64"
 
+$InstallerDist = Join-Path $DistDir "aicw-node-setup-windows-amd64-installer.exe"
+$SetupLocal = Join-Path $DistDir "aicw-node-setup.exe"
+$NsisInstaller = Join-Path $GuiDir "build\bin\aicw-node-setup-amd64-installer.exe"
+
 New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
 
 $NodeLocal = Join-Path $GuiDir "aicw-node.exe"
-$SetupDist = Join-Path $DistDir "aicw-node-setup-windows-amd64.exe"
-$SetupLocal = Join-Path $DistDir "aicw-node-setup.exe"
-$EngineDist = Join-Path $DistDir "aicw-node.exe"
-$ZipDist = Join-Path $DistDir "aicw-node-setup-windows-amd64.zip"
 
 Write-Host "Building aicw-node.exe..."
 Push-Location $Root
@@ -32,21 +32,25 @@ if (Get-Command wails -ErrorAction SilentlyContinue) {
 go mod tidy
 Pop-Location
 
-Write-Host "Building aicw-node-setup.exe..."
+Write-Host "Building NSIS installer..."
 Push-Location $GuiDir
 $env:CGO_ENABLED = "1"
 $env:GOOS = $Goos
 $env:GOARCH = $Goarch
-go build -tags production -trimpath -ldflags="-H windowsgui -s -w" -o $SetupDist .
+if (Get-Command wails -ErrorAction SilentlyContinue) {
+  wails build -platform windows/amd64 -clean -skipbindings -nsis
+} else {
+  go run github.com/wailsapp/wails/v2/cmd/wails@v2.10.1 build -platform windows/amd64 -clean -skipbindings -nsis
+}
 Pop-Location
 
-Copy-Item $NodeLocal $EngineDist -Force
-Copy-Item $SetupDist $SetupLocal -Force
+if (-not (Test-Path $NsisInstaller)) {
+  throw "NSIS installer was not produced at $NsisInstaller"
+}
 
-if (Test-Path $ZipDist) { Remove-Item $ZipDist -Force }
-Compress-Archive -Path $SetupDist, $EngineDist -DestinationPath $ZipDist -Force
+Copy-Item $NsisInstaller $InstallerDist -Force
+Copy-Item $InstallerDist $SetupLocal -Force
 
 Write-Host "Done:"
-Write-Host "  $ZipDist"
+Write-Host "  $InstallerDist"
 Write-Host "  $SetupLocal"
-Write-Host "  $EngineDist"

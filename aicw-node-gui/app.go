@@ -131,7 +131,7 @@ func (a *App) GetBootstrap() BootstrapView {
 		InstallDir:        a.installDir,
 		DefaultInstallDir: config.DefaultLocalAppDataInstallDir(),
 		WebBaseURL:        config.WebBaseURL(),
-		Version:           "0.1.0-gui",
+		Version:           "0.1.11-gui",
 		NodeRunning:       a.nodeProc.IsRunning() || len(nodeprocess.DiscoverRunningNodeNames(a.installDir)) > 0,
 	}
 	if a.session != nil {
@@ -184,7 +184,7 @@ func (a *App) RunInstall() InstallResult {
 		Installed:   true,
 		InstallDir:  a.installDir,
 		InstalledAt: time.Now().UTC().Format(time.RFC3339),
-		Version:     "0.1.0-gui",
+		Version:     "0.1.11-gui",
 	}
 	if err := a.saveInstallStateLocked(); err != nil {
 		return InstallResult{Error: err.Error()}

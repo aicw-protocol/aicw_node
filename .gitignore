@@ -14,7 +14,10 @@
 /mpcium-node
 /dist/
 /aicw-node-gui/aicw-node.exe
-/aicw-node-gui/build/
+/aicw-node-gui/build/bin/
+/aicw-node-gui/build/windows/installer/wails_tools.nsh
+/aicw-node-gui/build/windows/installer/info.json
+/aicw-node-gui/build/windows/installer/tmp/
 
 # Runtime / local data
 test-local/
