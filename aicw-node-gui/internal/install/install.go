@@ -35,9 +35,16 @@ func NodeBinaryPath(installDir string) string {
 	return filepath.Join(installDir, NodeBinaryName())
 }
 
+func isUsableBinaryFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() || info.Size() < 1024 {
+		return false
+	}
+	return true
+}
+
 func IsNodeBinaryPresent(installDir string) bool {
-	info, err := os.Stat(NodeBinaryPath(installDir))
-	return err == nil && !info.IsDir()
+	return isUsableBinaryFile(NodeBinaryPath(installDir))
 }
 
 func SaveState(path string, state *State) error {
@@ -77,7 +84,7 @@ func FindBundledNodeBinary(exePath string) string {
 		filepath.Join(dir, "..", "dist", "aicw-node-darwin-universal"),
 	}
 	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		if isUsableBinaryFile(candidate) {
 			return candidate
 		}
 	}
@@ -163,7 +170,7 @@ func InspectSharedSetup(installDir string) *SharedSetup {
 		InstallDir:   installDir,
 		MissingItems: []string{},
 	}
-	if info, err := os.Stat(filepath.Join(installDir, NodeBinaryName())); err == nil && !info.IsDir() {
+	if isUsableBinaryFile(filepath.Join(installDir, NodeBinaryName())) {
 		setup.NodeBinaryPresent = true
 	} else {
 		setup.MissingItems = append(setup.MissingItems, NodeBinaryName())
