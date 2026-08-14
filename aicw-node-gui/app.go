@@ -20,7 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const guiVersion = "0.1.20-gui"
+const guiVersion = "0.1.21-gui"
 
 type Session struct {
 	Wallet    string `json:"wallet"`
@@ -848,7 +848,24 @@ func (a *App) StartNode(nodeName string) NodeActionResult {
 	if err := a.nodeProc.Start(installDir, nodeName); err != nil {
 		return NodeActionResult{Error: err.Error()}
 	}
-	return NodeActionResult{OK: true}
+
+	// cmd.Start returns as soon as the process spawns, so a node that dies on a
+	// bad config would look like a successful start. Give it a moment and report
+	// the captured output instead of silently showing a stopped node.
+	time.Sleep(1500 * time.Millisecond)
+	if a.nodeProc.IsNodeRunning(installDir, nodeName) {
+		return NodeActionResult{OK: true}
+	}
+
+	logs := a.nodeProc.LogsForNode(nodeName)
+	if len(logs) > 6 {
+		logs = logs[len(logs)-6:]
+	}
+	detail := strings.TrimSpace(strings.Join(logs, "\n"))
+	if detail == "" {
+		detail = "no output was captured"
+	}
+	return NodeActionResult{Error: nodeName + " exited right after starting. Check the Logs tab.\n\n" + detail}
 }
 
 // StopNode terminates nodeName. An empty nodeName stops every node process for

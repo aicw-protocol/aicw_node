@@ -21,19 +21,22 @@ var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 const MaxConcurrentNodes = 5
 
 type nodeProcess struct {
-	cmd  *exec.Cmd
-	logs []string
+	cmd *exec.Cmd
 }
 
 type Manager struct {
-	mu        sync.Mutex
+	mu sync.Mutex
+	// processes tracks live processes only; entries disappear on exit.
 	processes map[string]*nodeProcess
-	maxLogs   int
+	// logs outlives processes so a node that exits immediately still reports why.
+	logs    map[string][]string
+	maxLogs int
 }
 
 func NewManager() *Manager {
 	return &Manager{
 		processes: map[string]*nodeProcess{},
+		logs:      map[string][]string{},
 		maxLogs:   400,
 	}
 }
@@ -176,24 +179,21 @@ func (m *Manager) LogsForNode(nodeName string) []string {
 	if nodeName == "" {
 		return m.allLogsLocked()
 	}
-	proc := m.processes[nodeName]
-	if proc == nil {
-		return nil
-	}
-	out := make([]string, len(proc.logs))
-	copy(out, proc.logs)
+	lines := m.logs[nodeName]
+	out := make([]string, len(lines))
+	copy(out, lines)
 	return out
 }
 
 func (m *Manager) allLogsLocked() []string {
-	names := make([]string, 0, len(m.processes))
-	for name := range m.processes {
+	names := make([]string, 0, len(m.logs))
+	for name := range m.logs {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	var out []string
 	for _, name := range names {
-		for _, line := range m.processes[name].logs {
+		for _, line := range m.logs[name] {
 			out = append(out, fmt.Sprintf("[%s] %s", name, line))
 		}
 	}
@@ -201,16 +201,16 @@ func (m *Manager) allLogsLocked() []string {
 }
 
 func (m *Manager) appendLog(nodeName, line string) {
+	if strings.TrimSpace(nodeName) == "" {
+		nodeName = "gui"
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	proc := m.processes[nodeName]
-	if proc == nil {
-		return
+	lines := append(m.logs[nodeName], line)
+	if len(lines) > m.maxLogs {
+		lines = lines[len(lines)-m.maxLogs:]
 	}
-	proc.logs = append(proc.logs, line)
-	if len(proc.logs) > m.maxLogs {
-		proc.logs = proc.logs[len(proc.logs)-m.maxLogs:]
-	}
+	m.logs[nodeName] = lines
 }
 
 func (m *Manager) Start(installDir, nodeName string) error {
