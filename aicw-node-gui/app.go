@@ -20,7 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const guiVersion = "0.1.25-gui"
+const guiVersion = "0.1.26-gui"
 
 type Session struct {
 	Wallet    string `json:"wallet"`
@@ -824,7 +824,7 @@ func (a *App) StartNode(nodeName string) NodeActionResult {
 	if a.nodeProc.IsNodeRunning(installDir, nodeName) {
 		return NodeActionResult{OK: true}
 	}
-	if a.nodeProc.RunningCount(installDir) >= nodeprocess.MaxConcurrentNodes {
+	if nodeprocess.MaxConcurrentNodes > 0 && a.nodeProc.RunningCount(installDir) >= nodeprocess.MaxConcurrentNodes {
 		return NodeActionResult{Error: fmt.Sprintf("Maximum %d nodes can run at once.", nodeprocess.MaxConcurrentNodes)}
 	}
 

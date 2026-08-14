@@ -18,7 +18,9 @@ import (
 
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
-const MaxConcurrentNodes = 5
+// MaxConcurrentNodes limits how many node processes one GUI may start.
+// Zero means no limit.
+const MaxConcurrentNodes = 0
 
 type nodeProcess struct {
 	cmd *exec.Cmd
@@ -224,7 +226,7 @@ func (m *Manager) Start(installDir, nodeName string) error {
 		m.mu.Unlock()
 		return nil
 	}
-	if len(m.runningNamesLocked(installDir)) >= MaxConcurrentNodes {
+	if MaxConcurrentNodes > 0 && len(m.runningNamesLocked(installDir)) >= MaxConcurrentNodes {
 		m.mu.Unlock()
 		return fmt.Errorf("maximum %d nodes can run at once", MaxConcurrentNodes)
 	}

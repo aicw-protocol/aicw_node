@@ -290,8 +290,10 @@ function startBlockReason(node, dashboard) {
     }
     return missing ? `Missing files: ${missing}` : "Local config files are missing.";
   }
-  const max = dashboard?.maxConcurrentNodes || 5;
-  if ((dashboard?.runningCount || 0) >= max) return `Already running the maximum of ${max} nodes.`;
+  const max = dashboard?.maxConcurrentNodes || 0;
+  if (max > 0 && (dashboard?.runningCount || 0) >= max) {
+    return `Already running the maximum of ${max} nodes.`;
+  }
   return "";
 }
 
@@ -341,7 +343,7 @@ function renderNodeItem(node, dashboard) {
 
 function renderStatusStrip(dashboard) {
   if (!dashboard.wallet) return "";
-  const max = dashboard.maxConcurrentNodes || 5;
+  const max = dashboard.maxConcurrentNodes || 0;
   const count = dashboard.runningCount || 0;
   let strip = "";
   if (dashboard.offboard?.pendingUnstake) {
@@ -352,9 +354,10 @@ function renderStatusStrip(dashboard) {
   }
   if (count > 0) {
     const names = (dashboard.runningNodeNames || []).map(escapeHtml).join(", ");
-    strip += `<div class="status-strip status-running">Running <strong>${count}/${max}</strong>${names ? `: ${names}` : ""} — logs are in the Logs tab.</div>`;
+    const countLabel = max > 0 ? `${count}/${max}` : String(count);
+    strip += `<div class="status-strip status-running">Running <strong>${countLabel}</strong>${names ? `: ${names}` : ""} — logs are in the Logs tab.</div>`;
   } else if (!strip) {
-    strip = `<div class="status-strip">No node process is running (up to ${max} at once).</div>`;
+    strip = `<div class="status-strip">No node process is running.</div>`;
   }
   return strip;
 }
