@@ -560,15 +560,16 @@ function bindDashboardEvents(dashboard) {
     renderDashboardShell();
   });
   document.getElementById("registerModalBackdrop")?.addEventListener("click", (event) => {
-    if (event.target.id === "registerModalBackdrop" && !state.registerBusy) {
+    if (event.target.id === "registerModalBackdrop") {
       state.showRegisterModal = false;
       renderDashboardShell();
     }
   });
   document.getElementById("btnCancelRegister")?.addEventListener("click", () => {
-    if (state.registerBusy) return;
     state.showRegisterModal = false;
-    state.registerNodeName = "";
+    if (!state.registerBusy) {
+      state.registerNodeName = "";
+    }
     renderDashboardShell();
   });
   document.getElementById("registerNodeNameInput")?.addEventListener("input", (event) => {

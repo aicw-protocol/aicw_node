@@ -5,7 +5,7 @@ Unicode true
 !define INFO_PROJECTNAME "aicw-node-gui"
 !define INFO_COMPANYNAME "AICW"
 !define INFO_PRODUCTNAME "AICW Node"
-!define INFO_PRODUCTVERSION "0.1.11"
+!define INFO_PRODUCTVERSION "0.1.15"
 !define INFO_COPYRIGHT "Copyright AICW"
 !define PRODUCT_EXECUTABLE "aicw-node-setup.exe"
 !define UNINST_KEY_NAME "AICW Node"
@@ -45,14 +45,28 @@ OutFile "..\..\bin\aicw-node-setup-amd64-installer.exe"
 InstallDir "$LOCALAPPDATA\Programs\AICW Node"
 ShowInstDetails show
 
+Function CloseAICWProcesses
+ nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /IM aicw-node-setup.exe /T'
+ nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /IM aicw-node.exe /T'
+ Sleep 1500
+FunctionEnd
+
+Function un.CloseAICWProcesses
+ nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /IM aicw-node-setup.exe /T'
+ nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /IM aicw-node.exe /T'
+ Sleep 1500
+FunctionEnd
+
 Function .onInit
  !insertmacro wails.checkArchitecture
+ Call CloseAICWProcesses
 FunctionEnd
 
 Section
  !insertmacro wails.setShellContext
  !insertmacro wails.webview2runtime
 
+ Call CloseAICWProcesses
  SetOutPath $INSTDIR
 
  !insertmacro wails.files
@@ -86,6 +100,7 @@ FunctionEnd
 Section "uninstall"
  !insertmacro wails.setShellContext
 
+ Call un.CloseAICWProcesses
  RMDir /r "$AppData\${PRODUCT_EXECUTABLE}"
  RMDir /r $INSTDIR
 
