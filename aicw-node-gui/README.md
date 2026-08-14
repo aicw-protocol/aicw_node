@@ -12,6 +12,8 @@ Supported platforms: **Windows**, **Linux (amd64)**, **macOS (Universal .app)**.
 4. **+ Register Node** — identity created locally, wallet signs registration, config files written automatically
 5. **Start** nodes (up to 5 at once) — logs in the **Logs** tab
 
+After the OS installer or zip extract, the app **auto-detects** the bundled node engine and skips the old license/folder wizard. You land on the dashboard and only need wallet sign-in plus node registration.
+
 The web dashboard is for **staking, status, offboard/unstake, and rewards**. Node registration happens in this app.
 
 ## Release downloads

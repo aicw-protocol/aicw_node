@@ -20,6 +20,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+const guiVersion = "0.1.13-gui"
+
 type Session struct {
 	Wallet    string `json:"wallet"`
 	Verified  bool   `json:"verified"`
@@ -63,6 +65,41 @@ func (a *App) startup(ctx context.Context) {
 		a.exePath = exe
 	}
 	a.loadPersistedState()
+	a.ensureInstallBootstrapped()
+}
+
+func (a *App) ensureInstallBootstrapped() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.installState.Installed {
+		return
+	}
+
+	if install.IsNodeBinaryPresent(a.installDir) {
+		a.markInstalledLocked()
+		return
+	}
+
+	source := install.FindBundledNodeBinary(a.exePath)
+	if source == "" {
+		return
+	}
+
+	if err := install.Install(source, a.installDir); err != nil {
+		return
+	}
+	a.markInstalledLocked()
+}
+
+func (a *App) markInstalledLocked() {
+	a.installState = &install.State{
+		Installed:   true,
+		InstallDir:  a.installDir,
+		InstalledAt: time.Now().UTC().Format(time.RFC3339),
+		Version:     guiVersion,
+	}
+	_ = a.saveInstallStateLocked()
 }
 
 func (a *App) stateFilePath() string {
@@ -131,7 +168,7 @@ func (a *App) GetBootstrap() BootstrapView {
 		InstallDir:        a.installDir,
 		DefaultInstallDir: config.DefaultLocalAppDataInstallDir(),
 		WebBaseURL:        config.WebBaseURL(),
-		Version:           "0.1.11-gui",
+		Version:           guiVersion,
 		NodeRunning:       a.nodeProc.IsRunning() || len(nodeprocess.DiscoverRunningNodeNames(a.installDir)) > 0,
 	}
 	if a.session != nil {
@@ -184,7 +221,7 @@ func (a *App) RunInstall() InstallResult {
 		Installed:   true,
 		InstallDir:  a.installDir,
 		InstalledAt: time.Now().UTC().Format(time.RFC3339),
-		Version:     "0.1.11-gui",
+		Version:     guiVersion,
 	}
 	if err := a.saveInstallStateLocked(); err != nil {
 		return InstallResult{Error: err.Error()}

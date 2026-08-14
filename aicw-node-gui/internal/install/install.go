@@ -31,6 +31,15 @@ func LoadState(path string) (*State, error) {
 	return &state, nil
 }
 
+func NodeBinaryPath(installDir string) string {
+	return filepath.Join(installDir, NodeBinaryName())
+}
+
+func IsNodeBinaryPresent(installDir string) bool {
+	info, err := os.Stat(NodeBinaryPath(installDir))
+	return err == nil && !info.IsDir()
+}
+
 func SaveState(path string, state *State) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
