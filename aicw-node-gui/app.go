@@ -20,7 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const guiVersion = "0.1.22-gui"
+const guiVersion = "0.1.23-gui"
 
 type Session struct {
 	Wallet    string `json:"wallet"`

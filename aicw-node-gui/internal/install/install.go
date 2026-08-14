@@ -103,10 +103,25 @@ func Install(sourceBinary, targetDir string) error {
 	}
 
 	targetBinary := filepath.Join(targetDir, NodeBinaryName())
+	if samePath(sourceBinary, targetBinary) {
+		if isUsableBinaryFile(targetBinary) {
+			return os.Chmod(targetBinary, 0o755)
+		}
+		return fmt.Errorf("bundled %s is missing or invalid", NodeBinaryName())
+	}
 	if err := copyFile(sourceBinary, targetBinary); err != nil {
 		return err
 	}
 	return os.Chmod(targetBinary, 0o755)
+}
+
+func samePath(a, b string) bool {
+	aPath, errA := filepath.Abs(a)
+	bPath, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return aPath == bPath
 }
 
 func copyFile(src, dst string) error {
