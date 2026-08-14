@@ -291,8 +291,23 @@ function renderInstalling() {
   setFooter("");
 }
 
+function startBlockReason(node, dashboard) {
+  if (node.processRunning) return "Already running";
+  if (node.webStatus === "local_only") return "This node is not registered on the network yet.";
+  if (!node.localReady) {
+    const missing = (node.missingItems || []).join(", ");
+    if (missing.includes("identity/") || missing.includes("private_key")) {
+      return "Local identity/private key is missing. Unstake this node, then register a new name from this app.";
+    }
+    return missing ? `Missing files: ${missing}` : "Local config files are missing.";
+  }
+  const max = dashboard?.maxConcurrentNodes || 5;
+  if ((dashboard?.runningCount || 0) >= max) return `Already running the maximum of ${max} nodes.`;
+  return "";
+}
+
 function renderNodeItem(node, dashboard) {
-  const expanded = Boolean(state.expandedNodes[node.nodeName]);
+  const expanded = state.expandedNodes[node.nodeName] ?? !node.localReady;
   const badges = [];
   if (node.processRunning) badges.push('<span class="badge badge-running">Running</span>');
   badges.push(`<span class="badge ${webStatusBadgeClass(node.webStatus)}">${webStatusLabel(node.webStatus)}</span>`);
@@ -307,9 +322,8 @@ function renderNodeItem(node, dashboard) {
       ? `<ul class="missing-list">${node.missingItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
       : "";
 
-  const max = dashboard?.maxConcurrentNodes || 5;
-  const atCapacity = (dashboard?.runningCount || 0) >= max;
-  const canStart = node.webStatus !== "local_only" && node.localReady && !node.processRunning && !atCapacity;
+  const blockReason = startBlockReason(node, dashboard);
+  const canStart = !blockReason;
   const canStop = node.processRunning;
   const canUnstake = Boolean(node.canUnstake) && !state.unstakeBusy;
 
@@ -319,6 +333,10 @@ function renderNodeItem(node, dashboard) {
         <span class="node-chevron">${expanded ? "▾" : "▸"}</span>
         <span class="node-title">${escapeHtml(node.nodeName)}</span>
         <div class="node-badges">${badges.join("")}</div>
+        <div class="node-quick-actions">
+          <button class="primary btn-start-node" data-node="${escapeHtml(node.nodeName)}" ${canStart ? "" : "disabled"} title="${escapeHtml(blockReason || "Start this node")}">Start</button>
+          <button class="btn-stop-node" data-node="${escapeHtml(node.nodeName)}" ${canStop ? "" : "disabled"}>Stop</button>
+        </div>
       </div>
       <div class="node-details ${expanded ? "open" : ""}">
         <div class="node-meta">
@@ -326,9 +344,8 @@ function renderNodeItem(node, dashboard) {
           ${node.publicKey ? `<div><strong>Public key</strong><br/><code>${escapeHtml(node.publicKey)}</code></div>` : ""}
         </div>
         ${missing}
+        ${blockReason && !node.processRunning ? `<p class="muted">${escapeHtml(blockReason)}</p>` : ""}
         <div class="toolbar">
-          <button class="primary btn-start-node" data-node="${escapeHtml(node.nodeName)}" ${canStart ? "" : "disabled"}>Start</button>
-          <button class="btn-stop-node" data-node="${escapeHtml(node.nodeName)}" ${canStop ? "" : "disabled"}>Stop</button>
           <button class="btn-unstake-node" data-node="${escapeHtml(node.nodeName)}" ${canUnstake ? "" : "disabled"}>Unstake</button>
         </div>
       </div>
@@ -520,9 +537,12 @@ function bindDashboardEvents(dashboard) {
   document.querySelectorAll("[data-toggle]").forEach((el) => {
     el.onclick = () => {
       const name = el.dataset.toggle;
-      state.expandedNodes[name] = !state.expandedNodes[name];
+      state.expandedNodes[name] = !(state.expandedNodes[name] ?? true);
       renderDashboardShell();
     };
+  });
+  document.querySelectorAll(".node-quick-actions").forEach((el) => {
+    el.addEventListener("click", (event) => event.stopPropagation());
   });
 
   document.getElementById("logNodeFilter")?.addEventListener("change", (event) => {

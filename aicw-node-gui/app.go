@@ -20,7 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const guiVersion = "0.1.15-gui"
+const guiVersion = "0.1.16-gui"
 
 type Session struct {
 	Wallet    string `json:"wallet"`
@@ -517,20 +517,32 @@ func (a *App) EnsureSharedSetup() NodeActionResult {
 	installDir := a.installDir
 	a.mu.Unlock()
 
-	onboarding, err := a.webClient.GetOnboardingConfig()
-	if err != nil {
+	if err := a.writeSharedFiles(installDir); err != nil {
 		return NodeActionResult{Error: err.Error()}
 	}
+	return NodeActionResult{OK: true}
+}
 
+func (a *App) ensureSharedFilesIfMissing(installDir string) {
+	shared := install.InspectSharedSetup(installDir)
+	if shared.NetworkConfigFound && shared.PasswordFound {
+		return
+	}
+	_ = a.writeSharedFiles(installDir)
+}
+
+func (a *App) writeSharedFiles(installDir string) error {
+	onboarding, err := a.webClient.GetOnboardingConfig()
+	if err != nil {
+		return err
+	}
 	nodeWebURL := onboarding.NodeWebURL
 	if nodeWebURL == "" {
 		nodeWebURL = a.webClient.BaseURL
 	}
 	operatorYAML := setupfiles.BuildOperatorConfigYAML(nodeWebURL, onboarding.PingIntervalSeconds)
-	if _, err := setupfiles.EnsureSharedFiles(installDir, onboarding.NetworkConfigYaml, operatorYAML); err != nil {
-		return NodeActionResult{Error: err.Error()}
-	}
-	return NodeActionResult{OK: true}
+	_, err = setupfiles.EnsureSharedFiles(installDir, onboarding.NetworkConfigYaml, operatorYAML)
+	return err
 }
 
 func (a *App) SetWalletAddress(wallet string) BrowserSignInResult {
@@ -648,6 +660,8 @@ func (a *App) GetDashboard() DashboardView {
 	installed := a.installState.Installed
 	webBase := a.webClient.BaseURL
 	a.mu.Unlock()
+
+	a.ensureSharedFilesIfMissing(installDir)
 
 	runningNodeNames := a.nodeProc.RunningNodeNames(installDir)
 	runningNodes := map[string]bool{}

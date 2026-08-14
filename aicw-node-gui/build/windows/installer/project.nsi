@@ -5,7 +5,7 @@ Unicode true
 !define INFO_PROJECTNAME "aicw-node-gui"
 !define INFO_COMPANYNAME "AICW"
 !define INFO_PRODUCTNAME "AICW Node"
-!define INFO_PRODUCTVERSION "0.1.15"
+!define INFO_PRODUCTVERSION "0.1.16"
 !define INFO_COPYRIGHT "Copyright AICW"
 !define PRODUCT_EXECUTABLE "aicw-node-setup.exe"
 !define UNINST_KEY_NAME "AICW Node"

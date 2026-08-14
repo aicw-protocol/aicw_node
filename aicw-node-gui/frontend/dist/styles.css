@@ -316,6 +316,12 @@ button.danger:not(:disabled):hover {
   justify-content: flex-end;
 }
 
+.node-quick-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .badge {
   font-size: 0.75rem;
   font-weight: 600;
