@@ -17,6 +17,7 @@ const state = {
   unstakeConfirmNode: null,
   unstakeBusy: false,
   logNodeFilter: "all",
+  persistentEventsBound: false,
 };
 
 const LICENSE_TEXT = `AICW Node Operator Software
@@ -72,12 +73,6 @@ function setTabBar(visible) {
     <button class="tab-btn ${state.tab === "nodes" ? "active" : ""}" data-tab="nodes">Nodes</button>
     <button class="tab-btn ${state.tab === "logs" ? "active" : ""}" data-tab="logs">Logs</button>
   `;
-  tabBar.querySelectorAll(".tab-btn").forEach((btn) => {
-    btn.onclick = () => {
-      state.tab = btn.dataset.tab;
-      renderDashboardShell();
-    };
-  });
 }
 
 function registerPhaseLabel(phase) {
@@ -524,170 +519,7 @@ function syncRegisterNodeNameFromDom() {
   if (input) state.registerNodeName = input.value;
 }
 
-function bindDashboardEvents(dashboard) {
-  document.querySelectorAll("[data-toggle]").forEach((el) => {
-    el.onclick = () => {
-      const name = el.dataset.toggle;
-      state.expandedNodes[name] = !(state.expandedNodes[name] ?? true);
-      renderDashboardShell();
-    };
-  });
-
-  document.getElementById("logNodeFilter")?.addEventListener("change", (event) => {
-    state.logNodeFilter = event.target.value;
-    renderDashboardShell();
-  });
-
-  document.getElementById("btnRefresh")?.addEventListener("click", () => refreshDashboard());
-  document.getElementById("btnOpenFolder")?.addEventListener("click", () => call("OpenInstallFolder"));
-  document.getElementById("btnRepair")?.addEventListener("click", async () => {
-    const result = await call("RepairInstall");
-    if (!result.ok) alert(result.error || "Repair failed");
-    await refreshDashboard();
-  });
-  document.getElementById("btnEnsureShared")?.addEventListener("click", async () => {
-    const result = await call("EnsureSharedSetup");
-    if (!result.ok) alert(result.error || "Failed to generate config files");
-    await refreshDashboard();
-  });
-  document.getElementById("btnRegisterNode")?.addEventListener("click", () => {
-    if (!dashboard.wallet) {
-      alert("Sign in with your wallet first.");
-      return;
-    }
-    if (!dashboard.walletVerified) {
-      alert("Use Sign in with Browser so your wallet is verified before registering a node.");
-      return;
-    }
-    if (dashboard.canRegister === false) {
-      alert("You are not eligible to register a node yet. Check staking on the web dashboard.");
-      return;
-    }
-    state.showRegisterModal = true;
-    state.registerNodeName = "";
-    renderDashboardShell();
-  });
-  document.getElementById("registerModalBackdrop")?.addEventListener("click", (event) => {
-    if (event.target.id === "registerModalBackdrop") {
-      state.showRegisterModal = false;
-      renderDashboardShell();
-    }
-  });
-  document.getElementById("btnCancelRegister")?.addEventListener("click", () => {
-    state.showRegisterModal = false;
-    if (!state.registerBusy) {
-      state.registerNodeName = "";
-    }
-    renderDashboardShell();
-  });
-  document.getElementById("registerNodeNameInput")?.addEventListener("input", (event) => {
-    state.registerNodeName = event.target.value;
-  });
-  document.getElementById("btnSubmitRegister").onclick = async () => {
-    syncRegisterNodeNameFromDom();
-    const nodeName = state.registerNodeName.trim();
-    if (!nodeName) {
-      alert("Enter a node name.");
-      return;
-    }
-    if (state.registerBusy) return;
-    state.registerBusy = true;
-    state.registerPhase = "waiting_wallet";
-    state.registerNodeName = nodeName;
-    renderDashboardShell();
-    startRegisterRecoveryPoll(nodeName);
-    startRegisterStatusPoll();
-    try {
-      const result = await call("RegisterNode", nodeName);
-      if (!result?.pending) {
-        finishRegisterFlow(result);
-      }
-    } catch (error) {
-      clearRegisterRecoveryPoll();
-      clearRegisterStatusPoll();
-      state.registerBusy = false;
-      state.registerPhase = "";
-      alert(String(error));
-      renderDashboardShell();
-    }
-  };
-
-  document.getElementById("btnBrowserSignIn")?.addEventListener("click", async () => {
-    const result = await call("SignInWithBrowser");
-    if (!result.ok) alert(result.error || "Browser sign-in failed");
-    await refreshDashboard();
-  });
-
-  document.querySelectorAll(".btn-start-node").forEach((btn) => {
-    btn.onclick = async (event) => {
-      event.stopPropagation();
-      try {
-        const result = await call("StartNode", btn.dataset.node);
-        if (!result.ok) {
-          alert(result.error || "Failed to start node");
-          await refreshDashboard();
-          return;
-        }
-        state.tab = "logs";
-        await refreshDashboard();
-      } catch (err) {
-        alert("Start failed: " + String(err));
-        await refreshDashboard();
-      }
-    };
-  });
-  document.querySelectorAll(".btn-stop-node").forEach((btn) => {
-    btn.onclick = (event) => {
-      event.stopPropagation();
-      state.stopConfirmNode = btn.dataset.node;
-      renderDashboardShell();
-    };
-  });
-  document.querySelectorAll(".btn-unstake-node").forEach((btn) => {
-    btn.onclick = (event) => {
-      event.stopPropagation();
-      state.unstakeConfirmNode = btn.dataset.node;
-      renderDashboardShell();
-    };
-  });
-  document.getElementById("btnCancelStop")?.addEventListener("click", () => {
-    if (state.stopBusy) return;
-    state.stopConfirmNode = null;
-    renderDashboardShell();
-  });
-  document.getElementById("btnConfirmStop")?.addEventListener("click", async () => {
-    if (state.stopBusy) return;
-    const nodeName = state.stopConfirmNode;
-    state.stopBusy = true;
-    renderDashboardShell();
-    const result = await call("StopNode", nodeName);
-    state.stopBusy = false;
-    state.stopConfirmNode = null;
-    if (!result.ok) alert(result.error || "Failed to stop node");
-    await refreshDashboard();
-  });
-  document.getElementById("btnCancelUnstake")?.addEventListener("click", () => {
-    if (state.unstakeBusy) return;
-    state.unstakeConfirmNode = null;
-    renderDashboardShell();
-  });
-  document.getElementById("btnConfirmUnstake")?.addEventListener("click", async () => {
-    if (state.unstakeBusy) return;
-    const nodeName = state.unstakeConfirmNode;
-    state.unstakeBusy = true;
-    renderDashboardShell();
-    const result = await call("UnstakeNode", nodeName);
-    state.unstakeBusy = false;
-    state.unstakeConfirmNode = null;
-    if (!result.ok) {
-      alert(result.error || "Unstake failed");
-      await refreshDashboard();
-      return;
-    }
-    alert(result.message || "Unstake started.");
-    await refreshDashboard();
-  });
-
+function bindDashboardEvents() {
   const logBox = document.getElementById("logBox");
   if (logBox) logBox.scrollTop = logBox.scrollHeight;
 }
@@ -695,11 +527,6 @@ function bindDashboardEvents(dashboard) {
 function renderDashboardHeader(dashboard) {
   if (!dashboard.wallet) {
     setHeader(`<button id="btnHeaderSignIn" class="primary">Sign in</button>`);
-    document.getElementById("btnHeaderSignIn").onclick = async () => {
-      const result = await call("SignInWithBrowser");
-      if (!result.ok) alert(result.error || "Browser sign-in failed");
-      await refreshDashboard();
-    };
     return;
   }
 
@@ -709,21 +536,270 @@ function renderDashboardHeader(dashboard) {
     <button id="btnHeaderDashboard" class="ghost">Dashboard</button>
     <button id="btnHeaderSignOut" class="ghost">Sign out</button>
   `);
-  document.getElementById("btnHeaderStaking").onclick = () => {
-    call("OpenExternalURL", dashboard.stakingUrl);
-  };
-  document.getElementById("btnHeaderDashboard").onclick = () => {
-    call("OpenExternalURL", dashboard.dashboardUrl);
-  };
-  document.getElementById("btnHeaderSignOut").onclick = async () => {
-    const stop = await call("StopNode", "");
-    if (!stop.ok) {
-      alert(stop.error || "Failed to stop node");
+}
+
+async function handleBrowserSignIn() {
+  try {
+    const result = await call("SignInWithBrowser");
+    if (!result.ok) alert(result.error || "Browser sign-in failed");
+    await refreshDashboard({ force: true });
+  } catch (error) {
+    alert(String(error));
+  }
+}
+
+async function handleStartNode(nodeName) {
+  try {
+    const result = await call("StartNode", nodeName);
+    if (!result.ok) {
+      alert(result.error || "Failed to start node");
+      await refreshDashboard({ force: true });
       return;
     }
-    await call("SignOut");
-    await refreshDashboard();
-  };
+    state.tab = "logs";
+    await refreshDashboard({ force: true });
+  } catch (error) {
+    alert("Start failed: " + String(error));
+    await refreshDashboard({ force: true });
+  }
+}
+
+async function handleHeaderSignOut(dashboard) {
+  const stop = await call("StopNode", "");
+  if (!stop.ok) {
+    alert(stop.error || "Failed to stop node");
+    return;
+  }
+  await call("SignOut");
+  await refreshDashboard({ force: true });
+}
+
+function bindPersistentEvents() {
+  if (state.persistentEventsBound) return;
+  state.persistentEventsBound = true;
+
+  const app = document.getElementById("app");
+  app.addEventListener(
+    "mousedown",
+    (event) => {
+      if (state.step !== "dashboard") return;
+      const btn = event.target.closest("button");
+      if (!btn || btn.disabled) return;
+
+      const dashboard = state.dashboard || { nodes: [] };
+
+      if (btn.classList.contains("tab-btn")) {
+        event.preventDefault();
+        state.tab = btn.dataset.tab;
+        renderDashboardShell({ force: true });
+        return;
+      }
+      if (btn.id === "btnBrowserSignIn" || btn.id === "btnHeaderSignIn") {
+        event.preventDefault();
+        void handleBrowserSignIn();
+        return;
+      }
+      if (btn.classList.contains("btn-start-node")) {
+        event.preventDefault();
+        void handleStartNode(btn.dataset.node);
+        return;
+      }
+      if (btn.classList.contains("btn-stop-node")) {
+        event.preventDefault();
+        state.stopConfirmNode = btn.dataset.node;
+        renderDashboardShell({ force: true });
+        return;
+      }
+      if (btn.classList.contains("btn-unstake-node")) {
+        event.preventDefault();
+        state.unstakeConfirmNode = btn.dataset.node;
+        renderDashboardShell({ force: true });
+        return;
+      }
+      if (btn.id === "btnRefresh") {
+        event.preventDefault();
+        void refreshDashboard({ force: true });
+        return;
+      }
+      if (btn.id === "btnOpenFolder") {
+        event.preventDefault();
+        void call("OpenInstallFolder");
+        return;
+      }
+      if (btn.id === "btnRepair") {
+        event.preventDefault();
+        void (async () => {
+          const result = await call("RepairInstall");
+          if (!result.ok) alert(result.error || "Repair failed");
+          await refreshDashboard({ force: true });
+        })();
+        return;
+      }
+      if (btn.id === "btnEnsureShared") {
+        event.preventDefault();
+        void (async () => {
+          const result = await call("EnsureSharedSetup");
+          if (!result.ok) alert(result.error || "Failed to generate config files");
+          await refreshDashboard({ force: true });
+        })();
+        return;
+      }
+      if (btn.id === "btnRegisterNode") {
+        event.preventDefault();
+        if (!dashboard.wallet) {
+          alert("Sign in with your wallet first.");
+          return;
+        }
+        if (!dashboard.walletVerified) {
+          alert("Use Sign in with Browser so your wallet is verified before registering a node.");
+          return;
+        }
+        if (dashboard.canRegister === false) {
+          alert("You are not eligible to register a node yet. Check staking on the web dashboard.");
+          return;
+        }
+        state.showRegisterModal = true;
+        state.registerNodeName = "";
+        renderDashboardShell({ force: true });
+        return;
+      }
+      if (btn.id === "btnCancelRegister") {
+        event.preventDefault();
+        state.showRegisterModal = false;
+        if (!state.registerBusy) state.registerNodeName = "";
+        renderDashboardShell({ force: true });
+        return;
+      }
+      if (btn.id === "btnSubmitRegister") {
+        event.preventDefault();
+        void submitRegisterNode();
+        return;
+      }
+      if (btn.id === "btnCancelStop") {
+        event.preventDefault();
+        if (state.stopBusy) return;
+        state.stopConfirmNode = null;
+        renderDashboardShell({ force: true });
+        return;
+      }
+      if (btn.id === "btnConfirmStop") {
+        event.preventDefault();
+        void confirmStopNode();
+        return;
+      }
+      if (btn.id === "btnCancelUnstake") {
+        event.preventDefault();
+        if (state.unstakeBusy) return;
+        state.unstakeConfirmNode = null;
+        renderDashboardShell({ force: true });
+        return;
+      }
+      if (btn.id === "btnConfirmUnstake") {
+        event.preventDefault();
+        void confirmUnstakeNode();
+        return;
+      }
+      if (btn.id === "btnHeaderStaking") {
+        event.preventDefault();
+        call("OpenExternalURL", dashboard.stakingUrl);
+        return;
+      }
+      if (btn.id === "btnHeaderDashboard") {
+        event.preventDefault();
+        call("OpenExternalURL", dashboard.dashboardUrl);
+        return;
+      }
+      if (btn.id === "btnHeaderSignOut") {
+        event.preventDefault();
+        void handleHeaderSignOut(dashboard);
+      }
+    },
+    true,
+  );
+
+  app.addEventListener("click", (event) => {
+    if (state.step !== "dashboard") return;
+    if (event.target.id === "registerModalBackdrop") {
+      state.showRegisterModal = false;
+      renderDashboardShell({ force: true });
+      return;
+    }
+    const toggle = event.target.closest("[data-toggle]");
+    if (!toggle || event.target.closest("button")) return;
+    const name = toggle.dataset.toggle;
+    state.expandedNodes[name] = !(state.expandedNodes[name] ?? true);
+    renderDashboardShell({ force: true });
+  });
+
+  app.addEventListener("change", (event) => {
+    if (state.step !== "dashboard") return;
+    if (event.target.id === "logNodeFilter") {
+      state.logNodeFilter = event.target.value;
+      renderDashboardShell({ force: true });
+    }
+  });
+
+  app.addEventListener("input", (event) => {
+    if (event.target.id === "registerNodeNameInput") {
+      state.registerNodeName = event.target.value;
+    }
+  });
+}
+
+async function submitRegisterNode() {
+  syncRegisterNodeNameFromDom();
+  const nodeName = state.registerNodeName.trim();
+  if (!nodeName) {
+    alert("Enter a node name.");
+    return;
+  }
+  if (state.registerBusy) return;
+  state.registerBusy = true;
+  state.registerPhase = "waiting_wallet";
+  state.registerNodeName = nodeName;
+  renderDashboardShell({ force: true });
+  startRegisterRecoveryPoll(nodeName);
+  startRegisterStatusPoll();
+  try {
+    const result = await call("RegisterNode", nodeName);
+    if (!result?.pending) finishRegisterFlow(result);
+  } catch (error) {
+    clearRegisterRecoveryPoll();
+    clearRegisterStatusPoll();
+    state.registerBusy = false;
+    state.registerPhase = "";
+    alert(String(error));
+    renderDashboardShell({ force: true });
+  }
+}
+
+async function confirmStopNode() {
+  if (state.stopBusy) return;
+  const nodeName = state.stopConfirmNode;
+  state.stopBusy = true;
+  renderDashboardShell({ force: true });
+  const result = await call("StopNode", nodeName);
+  state.stopBusy = false;
+  state.stopConfirmNode = null;
+  if (!result.ok) alert(result.error || "Failed to stop node");
+  await refreshDashboard({ force: true });
+}
+
+async function confirmUnstakeNode() {
+  if (state.unstakeBusy) return;
+  const nodeName = state.unstakeConfirmNode;
+  state.unstakeBusy = true;
+  renderDashboardShell({ force: true });
+  const result = await call("UnstakeNode", nodeName);
+  state.unstakeBusy = false;
+  state.unstakeConfirmNode = null;
+  if (!result.ok) {
+    alert(result.error || "Unstake failed");
+    await refreshDashboard({ force: true });
+    return;
+  }
+  alert(result.message || "Unstake started.");
+  await refreshDashboard({ force: true });
 }
 
 async function refreshDashboard(options) {
@@ -739,21 +815,30 @@ let pointerIsDown = false;
 let renderQueuedWhilePointerDown = false;
 
 function renderSignature(dashboard) {
-  return JSON.stringify([state.tab, state.logNodeFilter, dashboard, state.logs]);
+  const parts = [state.tab, state.logNodeFilter, dashboard];
+  if (state.tab === "logs") {
+    parts.push(state.logs?.length ?? 0, state.logs?.[state.logs.length - 1] ?? "");
+  }
+  return JSON.stringify(parts);
+}
+
+function shouldDeferRender(options) {
+  return pointerIsDown && !options?.force;
 }
 
 // Replacing innerHTML between mousedown and mouseup destroys the button the
-// browser is tracking, so the click event never fires. Background refreshes
-// therefore redraw only when the data actually changed and never mid-click.
-function renderDashboardShell(options) {
+// browser is tracking, so the click event never fires. Defer every redraw
+// while the pointer is down, and attach actions on #app with mousedown capture.
+function renderDashboardShell(options = {}) {
+  if (shouldDeferRender(options)) {
+    renderQueuedWhilePointerDown = true;
+    return;
+  }
+
   const dashboard = state.dashboard || { nodes: [] };
-  const background = Boolean(options && options.background);
+  const background = Boolean(options.background);
 
   if (background) {
-    if (pointerIsDown) {
-      renderQueuedWhilePointerDown = true;
-      return;
-    }
     const signature = renderSignature(dashboard);
     if (signature === lastRenderSignature) return;
   }
@@ -763,7 +848,7 @@ function renderDashboardShell(options) {
   renderDashboardHeader(dashboard);
   document.getElementById("screenRoot").innerHTML =
     state.tab === "logs" ? renderLogsTab(state.logs, dashboard) : renderNodesTab(dashboard);
-  bindDashboardEvents(dashboard);
+  bindDashboardEvents();
   setFooter(`<span class="muted">${escapeHtml(dashboard.installDir || "")}</span>`);
 }
 
@@ -799,6 +884,7 @@ function render() {
 async function boot() {
   try {
     bindRegisterEvents();
+    bindPersistentEvents();
     const bootstrap = await call("GetBootstrap");
     state.installDir = bootstrap.installDir || bootstrap.defaultInstallDir;
     document.getElementById("versionLabel").textContent = `v${bootstrap.version}`;
