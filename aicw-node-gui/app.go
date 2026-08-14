@@ -20,7 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const guiVersion = "0.1.13-gui"
+const guiVersion = "0.1.14-gui"
 
 type Session struct {
 	Wallet    string `json:"wallet"`
@@ -44,9 +44,11 @@ type App struct {
 	closePromptOpen bool
 	quitting        bool
 
-	registerMu     sync.Mutex
-	registerActive bool
-	registerPhase  string
+	registerMu       sync.Mutex
+	registerActive   bool
+	registerPhase    string
+	registerJobName  string
+	registerResult   *RegisterNodeResult
 }
 
 func NewApp() *App {
@@ -304,12 +306,53 @@ func (a *App) finishRegisterJob(result RegisterNodeResult) {
 	a.registerMu.Lock()
 	a.registerActive = false
 	a.registerPhase = ""
+	a.registerResult = &result
 	a.registerMu.Unlock()
 	runtime.EventsEmit(a.ctx, "register:finished", result)
 }
 
+type RegisterStatusView struct {
+	Active   bool               `json:"active"`
+	Phase    string             `json:"phase"`
+	NodeName string             `json:"nodeName,omitempty"`
+	Result   *RegisterNodeResult `json:"result,omitempty"`
+}
+
+func (a *App) GetRegisterStatus() RegisterStatusView {
+	a.registerMu.Lock()
+	defer a.registerMu.Unlock()
+
+	view := RegisterStatusView{
+		Active:   a.registerActive,
+		Phase:    a.registerPhase,
+		NodeName: a.registerJobName,
+	}
+	if a.registerResult != nil {
+		copy := *a.registerResult
+		view.Result = &copy
+	}
+	return view
+}
+
 func (a *App) emitRegisterFailure(authURL, message string) {
 	a.finishRegisterJob(RegisterNodeResult{Error: message, AuthURL: authURL})
+}
+
+func (a *App) configureLocalNodeFiles(installDir string, generated *nodeidentity.Generated) error {
+	onboarding, err := a.webClient.GetOnboardingConfig()
+	if err != nil {
+		return err
+	}
+
+	nodeWebURL := onboarding.NodeWebURL
+	if nodeWebURL == "" {
+		nodeWebURL = a.webClient.BaseURL
+	}
+	operatorYAML := setupfiles.BuildOperatorConfigYAML(nodeWebURL, onboarding.PingIntervalSeconds)
+	if _, err := setupfiles.EnsureSharedFiles(installDir, onboarding.NetworkConfigYaml, operatorYAML); err != nil {
+		return err
+	}
+	return nodeidentity.WriteFiles(installDir, generated)
 }
 
 func (a *App) runRegisterNodeJob(
@@ -317,7 +360,6 @@ func (a *App) runRegisterNodeJob(
 	generated *nodeidentity.Generated,
 	wallet, installDir, authURL string,
 ) {
-	a.setRegisterPhase("waiting_wallet")
 	result, err := server.WaitResult(3 * time.Minute)
 	if err != nil {
 		a.emitRegisterFailure(authURL, err.Error())
@@ -325,6 +367,12 @@ func (a *App) runRegisterNodeJob(
 	}
 	if result.Wallet != wallet {
 		a.emitRegisterFailure(authURL, "Signed wallet does not match the desktop session.")
+		return
+	}
+
+	a.setRegisterPhase("configuring")
+	if err := a.configureLocalNodeFiles(installDir, generated); err != nil {
+		a.emitRegisterFailure(authURL, err.Error())
 		return
 	}
 
@@ -340,27 +388,6 @@ func (a *App) runRegisterNodeJob(
 		SignedMessageBase64: result.SignedMessageBase64,
 	})
 	if err != nil {
-		a.emitRegisterFailure(authURL, err.Error())
-		return
-	}
-
-	a.setRegisterPhase("configuring")
-	onboarding, err := a.webClient.GetOnboardingConfig()
-	if err != nil {
-		a.emitRegisterFailure(authURL, err.Error())
-		return
-	}
-
-	nodeWebURL := onboarding.NodeWebURL
-	if nodeWebURL == "" {
-		nodeWebURL = a.webClient.BaseURL
-	}
-	operatorYAML := setupfiles.BuildOperatorConfigYAML(nodeWebURL, onboarding.PingIntervalSeconds)
-	if _, err := setupfiles.EnsureSharedFiles(installDir, onboarding.NetworkConfigYaml, operatorYAML); err != nil {
-		a.emitRegisterFailure(authURL, err.Error())
-		return
-	}
-	if err := nodeidentity.WriteFiles(installDir, generated); err != nil {
 		a.emitRegisterFailure(authURL, err.Error())
 		return
 	}
@@ -387,6 +414,8 @@ func (a *App) RegisterNode(nodeName string) RegisterNodeResult {
 	}
 	a.registerActive = true
 	a.registerPhase = "waiting_wallet"
+	a.registerJobName = nodeName
+	a.registerResult = nil
 	a.registerMu.Unlock()
 
 	a.mu.Lock()
@@ -467,6 +496,11 @@ func (a *App) RegisterNode(nodeName string) RegisterNodeResult {
 
 	go func() {
 		defer cancel()
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				a.emitRegisterFailure(authURL, fmt.Sprintf("registration crashed: %v", recovered))
+			}
+		}()
 		a.runRegisterNodeJob(server, generated, wallet, installDir, authURL)
 	}()
 

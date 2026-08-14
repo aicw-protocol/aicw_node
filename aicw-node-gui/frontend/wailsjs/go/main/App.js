@@ -34,6 +34,10 @@ export function GetRecommendedLinks() {
   return window['go']['main']['App']['GetRecommendedLinks']();
 }
 
+export function GetRegisterStatus() {
+  return window['go']['main']['App']['GetRegisterStatus']();
+}
+
 export function GetWalletStatus() {
   return window['go']['main']['App']['GetWalletStatus']();
 }

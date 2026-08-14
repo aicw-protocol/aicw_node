@@ -18,6 +18,8 @@ export function GetNodeLogs():Promise<Array<string>>;
 
 export function GetRecommendedLinks():Promise<Record<string, string>>;
 
+export function GetRegisterStatus():Promise<main.RegisterStatusView>;
+
 export function GetWalletStatus():Promise<main.WalletStatusView>;
 
 export function IsNodeRunning():Promise<boolean>;

@@ -243,6 +243,42 @@ export namespace main {
 	        this.authUrl = source["authUrl"];
 	    }
 	}
+	export class RegisterStatusView {
+	    active: boolean;
+	    phase: string;
+	    nodeName?: string;
+	    result?: RegisterNodeResult;
+	
+	    static createFrom(source: any = {}) {
+	        return new RegisterStatusView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.active = source["active"];
+	        this.phase = source["phase"];
+	        this.nodeName = source["nodeName"];
+	        this.result = this.convertValues(source["result"], RegisterNodeResult);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class UnstakeNodeResult {
 	    ok: boolean;
 	    error?: string;

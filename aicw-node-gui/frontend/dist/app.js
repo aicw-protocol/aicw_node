@@ -11,6 +11,7 @@ const state = {
   registerBusy: false,
   registerPhase: "",
   registerRecoveryTimer: null,
+  registerStatusTimer: null,
   stopConfirmNode: null,
   stopBusy: false,
   unstakeConfirmNode: null,
@@ -99,16 +100,42 @@ function clearRegisterRecoveryPoll() {
   }
 }
 
-function finishRegisterFlow(result) {
+function clearRegisterStatusPoll() {
+  if (state.registerStatusTimer) {
+    clearInterval(state.registerStatusTimer);
+    state.registerStatusTimer = null;
+  }
+}
+
+function normalizeRegisterResult(result) {
+  if (!result) return result;
+  return {
+    ok: Boolean(result.ok ?? result.OK),
+    pending: Boolean(result.pending ?? result.Pending),
+    error: result.error ?? result.Error ?? "",
+    nodeId: result.nodeId ?? result.NodeID ?? "",
+    nodeName: result.nodeName ?? result.NodeName ?? "",
+    publicKey: result.publicKey ?? result.PublicKey ?? "",
+    authUrl: result.authUrl ?? result.AuthURL ?? "",
+  };
+}
+
+function finishRegisterFlow(rawResult) {
+  const result = normalizeRegisterResult(rawResult);
   clearRegisterRecoveryPoll();
+  clearRegisterStatusPoll();
   state.registerBusy = false;
   state.registerPhase = "";
+  state.showRegisterModal = false;
   if (!result?.ok) {
-    alert(result?.error || "Node registration failed");
+    const message = result?.error || "Node registration failed";
+    alert(message);
+    state.registerNodeName = "";
     renderDashboardShell();
+    void refreshDashboard();
     return;
   }
-  state.showRegisterModal = false;
+  state.registerNodeName = "";
   if (result.nodeName) {
     state.expandedNodes[result.nodeName] = true;
   }
@@ -127,10 +154,7 @@ function startRegisterRecoveryPoll(nodeName) {
     try {
       const dashboard = await call("GetDashboard");
       const node = (dashboard.nodes || []).find(
-        (entry) =>
-          entry.nodeName === nodeName &&
-          entry.webStatus !== "local_only" &&
-          entry.localReady,
+        (entry) => entry.nodeName === nodeName && entry.webStatus !== "local_only",
       );
       if (node) {
         finishRegisterFlow({ ok: true, nodeName: node.nodeName, nodeId: node.nodeId });
@@ -139,6 +163,24 @@ function startRegisterRecoveryPoll(nodeName) {
       // Ignore transient dashboard errors while registration finishes.
     }
   }, 2500);
+}
+
+function startRegisterStatusPoll() {
+  clearRegisterStatusPoll();
+  state.registerStatusTimer = setInterval(async () => {
+    if (!state.registerBusy) {
+      clearRegisterStatusPoll();
+      return;
+    }
+    try {
+      const status = await call("GetRegisterStatus");
+      if (status?.result) {
+        finishRegisterFlow(status.result);
+      }
+    } catch {
+      // Ignore transient status errors while registration finishes.
+    }
+  }, 1000);
 }
 
 function bindRegisterEvents() {
@@ -545,6 +587,7 @@ function bindDashboardEvents(dashboard) {
     state.registerNodeName = nodeName;
     renderDashboardShell();
     startRegisterRecoveryPoll(nodeName);
+    startRegisterStatusPoll();
     try {
       const result = await call("RegisterNode", nodeName);
       if (!result?.pending) {
@@ -552,6 +595,7 @@ function bindDashboardEvents(dashboard) {
       }
     } catch (error) {
       clearRegisterRecoveryPoll();
+      clearRegisterStatusPoll();
       state.registerBusy = false;
       state.registerPhase = "";
       alert(String(error));
