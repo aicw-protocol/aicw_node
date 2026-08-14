@@ -153,6 +153,8 @@ function bindRegisterEvents() {
     if (!state.registerBusy) return;
     finishRegisterFlow(result);
   });
+}
+
 function webStatusLabel(status) {
   switch (status) {
     case "active":
