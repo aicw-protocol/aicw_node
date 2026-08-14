@@ -130,13 +130,16 @@ cp "$NODE_LOCAL" "$bundled_engine"
 chmod +x "$bundled_engine" 2>/dev/null || true
 
 if [ "$GOOS" = "windows" ] && [ "$TARGET_GOARCH" = "amd64" ]; then
-  win_zip="$DIST_DIR/aicw-node-setup-windows-amd64.zip"
+  win_zip="aicw-node-setup-windows-amd64.zip"
   if command -v zip >/dev/null 2>&1; then
     (cd "$DIST_DIR" && zip -j -q "$win_zip" \
       "aicw-node-setup-windows-amd64.exe" "$node_local_name")
   elif command -v powershell.exe >/dev/null 2>&1; then
-    powershell.exe -NoProfile -Command \
-      "Compress-Archive -Path '$SETUP_DIST','$bundled_engine' -DestinationPath '$win_zip' -Force"
+    (
+      cd "$DIST_DIR"
+      powershell.exe -NoProfile -Command \
+        "Compress-Archive -Path 'aicw-node-setup-windows-amd64.exe','$node_local_name' -DestinationPath '$win_zip' -Force"
+    )
   else
     echo "zip or powershell required to package Windows release" >&2
     exit 1
