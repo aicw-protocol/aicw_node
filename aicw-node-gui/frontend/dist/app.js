@@ -731,16 +731,39 @@ function renderDashboardHeader(dashboard) {
   };
 }
 
-async function refreshDashboard() {
+async function refreshDashboard(options) {
   syncRegisterNodeNameFromDom();
   const [dashboard, logs] = await Promise.all([call("GetDashboard"), call("GetNodeLogs")]);
   state.dashboard = dashboard;
   state.logs = logs;
-  renderDashboardShell();
+  renderDashboardShell(options);
 }
 
-function renderDashboardShell() {
+let lastRenderSignature = "";
+let pointerIsDown = false;
+let renderQueuedWhilePointerDown = false;
+
+function renderSignature(dashboard) {
+  return JSON.stringify([state.tab, state.logNodeFilter, dashboard, state.logs]);
+}
+
+// Replacing innerHTML between mousedown and mouseup destroys the button the
+// browser is tracking, so the click event never fires. Background refreshes
+// therefore redraw only when the data actually changed and never mid-click.
+function renderDashboardShell(options) {
   const dashboard = state.dashboard || { nodes: [] };
+  const background = Boolean(options && options.background);
+
+  if (background) {
+    if (pointerIsDown) {
+      renderQueuedWhilePointerDown = true;
+      return;
+    }
+    const signature = renderSignature(dashboard);
+    if (signature === lastRenderSignature) return;
+  }
+  lastRenderSignature = renderSignature(dashboard);
+
   setTabBar(true);
   renderDashboardHeader(dashboard);
   document.getElementById("screenRoot").innerHTML =
@@ -749,6 +772,17 @@ function renderDashboardShell() {
   setFooter(`<span class="muted">${escapeHtml(dashboard.installDir || "")}</span>`);
 }
 
+window.addEventListener("mousedown", () => {
+  pointerIsDown = true;
+});
+window.addEventListener("mouseup", () => {
+  pointerIsDown = false;
+  if (!renderQueuedWhilePointerDown) return;
+  renderQueuedWhilePointerDown = false;
+  // Defer past the click dispatch that follows this mouseup.
+  setTimeout(() => renderDashboardShell({ background: true }), 0);
+});
+
 function renderDashboard() {
   refreshDashboard();
   if (state.pollTimer) clearInterval(state.pollTimer);
@@ -756,7 +790,7 @@ function renderDashboard() {
     if (state.showRegisterModal || state.registerBusy) return;
     if (state.stopConfirmNode || state.stopBusy) return;
     if (state.unstakeConfirmNode || state.unstakeBusy) return;
-    refreshDashboard();
+    refreshDashboard({ background: true });
   }, 4000);
 }
 
