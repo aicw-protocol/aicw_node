@@ -54,7 +54,16 @@ jobs:
 
       - name: Install NSIS
         if: matrix.goos == 'windows'
-        run: choco install nsis -y
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          $nsis = Join-Path ${env:ProgramFiles(x86)} "NSIS"
+          if (-not (Test-Path $nsis)) {
+            $nsis = Join-Path $env:ProgramFiles "NSIS"
+          }
+          "$nsis" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "$nsis\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & "$nsis\Bin\makensis.exe" /VERSION
 
       - name: Build GUI
         working-directory: aicw_node
