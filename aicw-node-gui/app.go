@@ -20,7 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const guiVersion = "0.1.16-gui"
+const guiVersion = "0.1.17-gui"
 
 type Session struct {
 	Wallet    string `json:"wallet"`
@@ -68,6 +68,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.loadPersistedState()
 	a.ensureInstallBootstrapped()
+	a.ensureSharedFilesIfMissing(a.installDir)
 }
 
 func (a *App) ensureInstallBootstrapped() {
@@ -660,8 +661,6 @@ func (a *App) GetDashboard() DashboardView {
 	installed := a.installState.Installed
 	webBase := a.webClient.BaseURL
 	a.mu.Unlock()
-
-	a.ensureSharedFilesIfMissing(installDir)
 
 	runningNodeNames := a.nodeProc.RunningNodeNames(installDir)
 	runningNodes := map[string]bool{}

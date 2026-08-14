@@ -120,6 +120,11 @@ function normalizeRegisterResult(result) {
   };
 }
 
+function updateRegisterPhaseText(phase) {
+  const el = document.getElementById("registerPhaseText");
+  if (el) el.textContent = registerPhaseLabel(phase);
+}
+
 function finishRegisterFlow(rawResult) {
   const result = normalizeRegisterResult(rawResult);
   clearRegisterRecoveryPoll();
@@ -139,30 +144,15 @@ function finishRegisterFlow(rawResult) {
   if (result.nodeName) {
     state.expandedNodes[result.nodeName] = true;
   }
-  state.tab = "logs";
+  state.tab = "nodes";
   renderDashboardShell();
   void refreshDashboard();
 }
 
 function startRegisterRecoveryPoll(nodeName) {
   clearRegisterRecoveryPoll();
-  state.registerRecoveryTimer = setInterval(async () => {
-    if (!state.registerBusy) {
-      clearRegisterRecoveryPoll();
-      return;
-    }
-    try {
-      const dashboard = await call("GetDashboard");
-      const node = (dashboard.nodes || []).find(
-        (entry) => entry.nodeName === nodeName && entry.webStatus !== "local_only",
-      );
-      if (node) {
-        finishRegisterFlow({ ok: true, nodeName: node.nodeName, nodeId: node.nodeId });
-      }
-    } catch {
-      // Ignore transient dashboard errors while registration finishes.
-    }
-  }, 2500);
+  // Intentionally empty: polling GetDashboard during registration can freeze the WebView.
+  void nodeName;
 }
 
 function startRegisterStatusPoll() {
@@ -174,6 +164,10 @@ function startRegisterStatusPoll() {
     }
     try {
       const status = await call("GetRegisterStatus");
+      if (status?.phase && status.phase !== state.registerPhase) {
+        state.registerPhase = status.phase;
+        updateRegisterPhaseText(status.phase);
+      }
       if (status?.result) {
         finishRegisterFlow(status.result);
       }
@@ -189,7 +183,7 @@ function bindRegisterEvents() {
   runtime.EventsOn("register:phase", (phase) => {
     if (!state.registerBusy) return;
     state.registerPhase = phase;
-    renderDashboardShell();
+    updateRegisterPhaseText(phase);
   });
   runtime.EventsOn("register:finished", (result) => {
     if (!state.registerBusy) return;
@@ -382,8 +376,8 @@ function renderRegisterModal(dashboard) {
 
   const phaseMessage =
     state.registerBusy && state.registerPhase
-      ? `<p class="register-phase muted">${escapeHtml(registerPhaseLabel(state.registerPhase))}</p>`
-      : "";
+      ? `<p class="register-phase muted" id="registerPhaseText">${escapeHtml(registerPhaseLabel(state.registerPhase))}</p>`
+      : `<p class="register-phase muted" id="registerPhaseText"></p>`;
 
   return `
     <div class="modal-backdrop" id="registerModalBackdrop">
@@ -450,9 +444,7 @@ function renderNodesTab(dashboard) {
     dashboard.sharedMissing?.length > 0
       ? `<div class="banner">
           Shared install files missing: ${dashboard.sharedMissing.map(escapeHtml).join(", ")}
-          <div class="toolbar" style="margin-top:10px">
-            <button id="btnEnsureShared" class="primary">Generate Config Files</button>
-          </div>
+          Use <strong>Generate Config Files</strong> to create them.
         </div>`
       : "";
 
@@ -489,6 +481,7 @@ function renderNodesTab(dashboard) {
           <button id="btnRegisterNode" class="primary">+ Register Node</button>
         </div>
         <div class="toolbar toolbar-secondary">
+          <button id="btnEnsureShared" class="ghost">Generate Config Files</button>
           <button id="btnRefresh" class="ghost">Refresh</button>
           <button id="btnOpenFolder" class="ghost">Install Folder</button>
           <button id="btnRepair" class="ghost">Repair Binary</button>
