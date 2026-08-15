@@ -14,8 +14,8 @@ const state = {
   registerStatusTimer: null,
   stopConfirmNode: null,
   stopBusy: false,
-  unstakeConfirmNode: null,
-  unstakeBusy: false,
+  removeConfirmNode: null,
+  removeBusy: false,
   logNodeFilter: "all",
   persistentEventsBound: false,
 };
@@ -286,7 +286,7 @@ function startBlockReason(node, dashboard) {
   if (!node.localReady) {
     const missing = (node.missingItems || []).join(", ");
     if (missing.includes("identity/") || missing.includes("private_key")) {
-      return "Local identity/private key is missing. Unstake this node, then register a new name from this app.";
+      return "Local identity/private key is missing. Remove this node, then register a new name from this app.";
     }
     return missing ? `Missing files: ${missing}` : "Local config files are missing.";
   }
@@ -316,7 +316,7 @@ function renderNodeItem(node, dashboard) {
   const blockReason = startBlockReason(node, dashboard);
   const canStart = !blockReason;
   const canStop = node.processRunning;
-  const canUnstake = Boolean(node.canUnstake) && !state.unstakeBusy;
+  const canRemove = Boolean(node.canRemove ?? node.canUnstake) && !state.removeBusy;
 
   return `
     <article class="node-item" data-node="${escapeHtml(node.nodeName)}">
@@ -328,7 +328,7 @@ function renderNodeItem(node, dashboard) {
       <div class="toolbar node-actions">
         <button class="primary btn-start-node" data-node="${escapeHtml(node.nodeName)}" ${canStart ? "" : "disabled"} title="${escapeHtml(blockReason || "Start this node")}">Start</button>
         <button class="btn-stop-node" data-node="${escapeHtml(node.nodeName)}" ${canStop ? "" : "disabled"}>Stop</button>
-        <button class="btn-unstake-node" data-node="${escapeHtml(node.nodeName)}" ${canUnstake ? "" : "disabled"}>Unstake</button>
+        <button class="btn-remove-node danger" data-node="${escapeHtml(node.nodeName)}" ${canRemove ? "" : "disabled"}>Remove node</button>
       </div>
       <div class="node-details ${expanded ? "open" : ""}">
         <div class="node-meta">
@@ -350,7 +350,7 @@ function renderStatusStrip(dashboard) {
     const when = dashboard.offboard.returnAvailableAt
       ? new Date(dashboard.offboard.returnAvailableAt).toLocaleString()
       : "after the 72-hour waiting period";
-    strip += `<div class="status-strip status-unstake">Unstake in progress — staked SOL returns around <strong>${escapeHtml(when)}</strong>.</div>`;
+    strip += `<div class="status-strip status-unstake">Stake return in progress — staked SOL returns around <strong>${escapeHtml(when)}</strong>.</div>`;
   }
   if (count > 0) {
     const names = (dashboard.runningNodeNames || []).map(escapeHtml).join(", ");
@@ -394,22 +394,31 @@ function renderRegisterModal(dashboard) {
     </div>`;
 }
 
-function renderUnstakeConfirmModal() {
-  if (!state.unstakeConfirmNode) return "";
+function renderRemoveConfirmModal() {
+  if (!state.removeConfirmNode) return "";
+  const node = (state.dashboard?.nodes || []).find((entry) => entry.nodeName === state.removeConfirmNode);
+  const localOnly = node?.webStatus === "local_only";
   return `
-    <div class="modal-backdrop" id="unstakeModalBackdrop">
+    <div class="modal-backdrop" id="removeModalBackdrop">
       <div class="modal">
-        <h2>Unstake Node</h2>
-        <p>Stop <strong>${escapeHtml(state.unstakeConfirmNode)}</strong>, remove it from the network, and begin unstaking?</p>
+        <h2>Remove node</h2>
+        <p>Remove <strong>${escapeHtml(state.removeConfirmNode)}</strong> from this computer${
+          localOnly ? "?" : " and the network?"
+        }</p>
         <ul class="muted unstake-steps">
           <li>The node process will be stopped.</li>
-          <li>Network registration and local identity files will be removed.</li>
-          <li>If this is your last node, staked SOL returns to your wallet after <strong>72 hours</strong>.</li>
+          ${
+            localOnly
+              ? "<li>Local identity and database files will be deleted.</li>"
+              : `<li>Network registration will be removed after you sign in your browser.</li>
+                 <li>Local identity and database files will be deleted.</li>
+                 <li>If this is your last node, staked SOL returns after <strong>72 hours</strong> (or immediately when testing).</li>`
+          }
         </ul>
         <div class="toolbar modal-actions">
-          <button id="btnCancelUnstake" ${state.unstakeBusy ? "disabled" : ""}>Cancel</button>
-          <button id="btnConfirmUnstake" class="danger" ${state.unstakeBusy ? "disabled" : ""}>
-            ${state.unstakeBusy ? "Processing…" : "Unstake"}
+          <button id="btnCancelRemove" ${state.removeBusy ? "disabled" : ""}>Cancel</button>
+          <button id="btnConfirmRemove" class="danger" ${state.removeBusy ? "disabled" : ""}>
+            ${state.removeBusy ? "Processing…" : "Remove node"}
           </button>
         </div>
       </div>
@@ -487,7 +496,7 @@ function renderNodesTab(dashboard) {
     </section>
     ${renderRegisterModal(dashboard)}
     ${renderStopConfirmModal()}
-    ${renderUnstakeConfirmModal()}`;
+    ${renderRemoveConfirmModal()}`;
 }
 
 function filterLogs(logs, filter) {
@@ -613,9 +622,9 @@ function bindPersistentEvents() {
         renderDashboardShell({ force: true });
         return;
       }
-      if (btn.classList.contains("btn-unstake-node")) {
+      if (btn.classList.contains("btn-remove-node")) {
         event.preventDefault();
-        state.unstakeConfirmNode = btn.dataset.node;
+        state.removeConfirmNode = btn.dataset.node;
         renderDashboardShell({ force: true });
         return;
       }
@@ -690,16 +699,16 @@ function bindPersistentEvents() {
         void confirmStopNode();
         return;
       }
-      if (btn.id === "btnCancelUnstake") {
+      if (btn.id === "btnCancelRemove") {
         event.preventDefault();
-        if (state.unstakeBusy) return;
-        state.unstakeConfirmNode = null;
+        if (state.removeBusy) return;
+        state.removeConfirmNode = null;
         renderDashboardShell({ force: true });
         return;
       }
-      if (btn.id === "btnConfirmUnstake") {
+      if (btn.id === "btnConfirmRemove") {
         event.preventDefault();
-        void confirmUnstakeNode();
+        void confirmRemoveNode();
         return;
       }
       if (btn.id === "btnHeaderStaking") {
@@ -788,20 +797,20 @@ async function confirmStopNode() {
   await refreshDashboard({ force: true });
 }
 
-async function confirmUnstakeNode() {
-  if (state.unstakeBusy) return;
-  const nodeName = state.unstakeConfirmNode;
-  state.unstakeBusy = true;
+async function confirmRemoveNode() {
+  if (state.removeBusy) return;
+  const nodeName = state.removeConfirmNode;
+  state.removeBusy = true;
   renderDashboardShell({ force: true });
-  const result = await call("UnstakeNode", nodeName);
-  state.unstakeBusy = false;
-  state.unstakeConfirmNode = null;
+  const result = await call("RemoveNode", nodeName);
+  state.removeBusy = false;
+  state.removeConfirmNode = null;
   if (!result.ok) {
-    alert(result.error || "Unstake failed");
+    alert(result.error || "Remove node failed");
     await refreshDashboard({ force: true });
     return;
   }
-  alert(result.message || "Unstake started.");
+  alert(result.message || "Node removed.");
   await refreshDashboard({ force: true });
 }
 
@@ -872,7 +881,7 @@ function renderDashboard() {
   state.pollTimer = setInterval(() => {
     if (state.showRegisterModal || state.registerBusy) return;
     if (state.stopConfirmNode || state.stopBusy) return;
-    if (state.unstakeConfirmNode || state.unstakeBusy) return;
+    if (state.removeConfirmNode || state.removeBusy) return;
     refreshDashboard({ background: true });
   }, 4000);
 }

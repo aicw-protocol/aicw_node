@@ -87,7 +87,7 @@ export namespace main {
 	    localReady: boolean;
 	    processRunning: boolean;
 	    missingItems: string[];
-	    canUnstake: boolean;
+	    canRemove: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new NodeRowView(source);
@@ -102,7 +102,7 @@ export namespace main {
 	        this.localReady = source["localReady"];
 	        this.processRunning = source["processRunning"];
 	        this.missingItems = source["missingItems"];
-	        this.canUnstake = source["canUnstake"];
+	        this.canRemove = source["canRemove"];
 	    }
 	}
 	export class OffboardStatusView {

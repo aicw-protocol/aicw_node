@@ -94,6 +94,10 @@ export function StopNode(arg1) {
   return window['go']['main']['App']['StopNode'](arg1);
 }
 
+export function RemoveNode(arg1) {
+  return window['go']['main']['App']['RemoveNode'](arg1);
+}
+
 export function UnstakeNode(arg1) {
   return window['go']['main']['App']['UnstakeNode'](arg1);
 }

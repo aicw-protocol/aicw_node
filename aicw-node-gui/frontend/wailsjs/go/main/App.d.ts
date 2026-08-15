@@ -48,4 +48,6 @@ export function StartNode(arg1:string):Promise<main.NodeActionResult>;
 
 export function StopNode(arg1:string):Promise<main.NodeActionResult>;
 
+export function RemoveNode(arg1:string):Promise<main.UnstakeNodeResult>;
+
 export function UnstakeNode(arg1:string):Promise<main.UnstakeNodeResult>;

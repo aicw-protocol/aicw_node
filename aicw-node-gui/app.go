@@ -611,6 +611,9 @@ type UnstakeNodeResult struct {
 	ReturnAvailableAt string `json:"returnAvailableAt,omitempty"`
 }
 
+// RemoveNodeResult is the unified remove-node response (alias for tooling).
+type RemoveNodeResult = UnstakeNodeResult
+
 type NodeRowView struct {
 	NodeID         string   `json:"nodeId"`
 	NodeName       string   `json:"nodeName"`
@@ -619,7 +622,7 @@ type NodeRowView struct {
 	LocalReady     bool     `json:"localReady"`
 	ProcessRunning bool     `json:"processRunning"`
 	MissingItems   []string `json:"missingItems"`
-	CanUnstake     bool     `json:"canUnstake"`
+	CanRemove      bool     `json:"canRemove"`
 }
 
 type OffboardStatusView struct {
@@ -772,6 +775,16 @@ func (a *App) GetDashboard() DashboardView {
 	return view
 }
 
+func canRemoveNode(webStatus, nodeID string, pendingUnstake bool) bool {
+	if pendingUnstake && webStatus != "local_only" {
+		return false
+	}
+	if webStatus == "local_only" {
+		return true
+	}
+	return nodeID != ""
+}
+
 func buildNodeRow(nodeID, nodeName string, local install.NodeLocalSetup, runningNodes map[string]bool, webStatus string, publicKey *string, pendingUnstake bool) NodeRowView {
 	row := NodeRowView{
 		NodeID:         nodeID,
@@ -780,7 +793,7 @@ func buildNodeRow(nodeID, nodeName string, local install.NodeLocalSetup, running
 		LocalReady:     local.ReadyToStart,
 		MissingItems:   local.MissingItems,
 		ProcessRunning: runningNodes[nodeName],
-		CanUnstake:     webStatus != "local_only" && nodeID != "" && !pendingUnstake,
+		CanRemove:      canRemoveNode(webStatus, nodeID, pendingUnstake),
 	}
 	if publicKey != nil {
 		row.PublicKey = *publicKey
@@ -799,7 +812,7 @@ func nodeRowFromLocal(local install.NodeLocalSetup, runningNodes map[string]bool
 		LocalReady:     local.ReadyToStart,
 		MissingItems:   local.MissingItems,
 		ProcessRunning: runningNodes[local.NodeName],
-		CanUnstake:     webStatus != "local_only" && local.NodeID != "" && !pendingUnstake,
+		CanRemove:      canRemoveNode(webStatus, local.NodeID, pendingUnstake),
 	}
 }
 
@@ -885,10 +898,10 @@ func (a *App) GetNodeLogs() []string {
 	return a.nodeProc.Logs()
 }
 
-func (a *App) UnstakeNode(nodeName string) UnstakeNodeResult {
+func (a *App) RemoveNode(nodeName string) RemoveNodeResult {
 	nodeName = strings.TrimSpace(nodeName)
 	if nodeName == "" {
-		return UnstakeNodeResult{Error: "Select a node to unstake."}
+		return RemoveNodeResult{Error: "Select a node to remove."}
 	}
 
 	a.mu.Lock()
@@ -902,15 +915,15 @@ func (a *App) UnstakeNode(nodeName string) UnstakeNodeResult {
 	a.mu.Unlock()
 
 	if wallet == "" {
-		return UnstakeNodeResult{Error: "Sign in with your wallet first."}
+		return RemoveNodeResult{Error: "Sign in with your wallet first."}
 	}
 	if !verified {
-		return UnstakeNodeResult{Error: "Use Sign in with Browser so your wallet is verified before unstaking a node."}
+		return RemoveNodeResult{Error: "Use Sign in with Browser so your wallet is verified before removing a node."}
 	}
 
 	view := a.GetDashboard()
 	if !view.OK && view.Error != "" {
-		return UnstakeNodeResult{Error: view.Error}
+		return RemoveNodeResult{Error: view.Error}
 	}
 
 	var target *NodeRowView
@@ -921,17 +934,22 @@ func (a *App) UnstakeNode(nodeName string) UnstakeNodeResult {
 		}
 	}
 	if target == nil {
-		return UnstakeNodeResult{Error: "Node not found."}
+		return RemoveNodeResult{Error: "Node not found."}
 	}
+	if !target.CanRemove {
+		return RemoveNodeResult{Error: "This node cannot be removed right now."}
+	}
+
 	if target.WebStatus == "local_only" {
-		return UnstakeNodeResult{Error: "Register this node before unstaking it."}
+		return a.removeLocalNodeFiles(installDir, wallet, nodeName, target.NodeID)
 	}
+
 	if target.NodeID == "" {
-		return UnstakeNodeResult{Error: "Node ID is missing for this node."}
+		return RemoveNodeResult{Error: "Node ID is missing for this node."}
 	}
 	if view.Offboard != nil && view.Offboard.PendingUnstake {
-		return UnstakeNodeResult{
-			Error:   "An unstake is already in progress for this wallet.",
+		return RemoveNodeResult{
+			Error:   "A stake return is already in progress for this wallet.",
 			Phase:   "already_pending",
 			Message: view.Offboard.ReturnAvailableAt,
 		}
@@ -939,12 +957,12 @@ func (a *App) UnstakeNode(nodeName string) UnstakeNodeResult {
 
 	if a.nodeProc.IsNodeRunning(installDir, nodeName) {
 		if err := a.nodeProc.Stop(installDir, nodeName); err != nil {
-			return UnstakeNodeResult{Error: fmt.Sprintf("Failed to stop node: %v", err)}
+			return RemoveNodeResult{Error: fmt.Sprintf("Failed to stop node: %v", err)}
 		}
 	}
 
 	if err := a.webClient.WaitForNodeInactive(target.NodeID, 6*time.Minute); err != nil {
-		return UnstakeNodeResult{Error: err.Error()}
+		return RemoveNodeResult{Error: err.Error()}
 	}
 
 	ctx, cancel := context.WithCancel(a.ctx)
@@ -952,7 +970,7 @@ func (a *App) UnstakeNode(nodeName string) UnstakeNodeResult {
 
 	server, callbackURL, err := authserver.Start(ctx, a.webClient.BaseURL)
 	if err != nil {
-		return UnstakeNodeResult{Error: err.Error()}
+		return RemoveNodeResult{Error: err.Error()}
 	}
 
 	authURL := nodeweb.AuthActionURL(
@@ -966,10 +984,10 @@ func (a *App) UnstakeNode(nodeName string) UnstakeNodeResult {
 
 	result, err := server.WaitResult(3 * time.Minute)
 	if err != nil {
-		return UnstakeNodeResult{Error: err.Error(), Message: authURL}
+		return RemoveNodeResult{Error: err.Error(), Message: authURL}
 	}
 	if result.Wallet != wallet {
-		return UnstakeNodeResult{Error: "Signed wallet does not match the desktop session."}
+		return RemoveNodeResult{Error: "Signed wallet does not match the desktop session."}
 	}
 
 	resp, err := a.webClient.OffboardNode(nodeweb.OffboardNodeRequest{
@@ -982,23 +1000,50 @@ func (a *App) UnstakeNode(nodeName string) UnstakeNodeResult {
 		SignedMessageBase64: result.SignedMessageBase64,
 	})
 	if err != nil {
-		return UnstakeNodeResult{Error: err.Error()}
+		return RemoveNodeResult{Error: err.Error()}
 	}
 
 	if err := install.RemoveNodeLocalSetup(installDir, nodeName); err != nil {
-		return UnstakeNodeResult{Error: fmt.Sprintf("Offboard started but local cleanup failed: %v", err)}
+		return RemoveNodeResult{Error: fmt.Sprintf("Network removal succeeded but local cleanup failed: %v", err)}
 	}
 	_ = a.webClient.LogLocalIdentityRemoved(wallet, target.NodeID, nodeName)
 
-	unstakeResult := UnstakeNodeResult{
+	removeResult := RemoveNodeResult{
 		OK:      true,
 		Phase:   resp.Phase,
 		Message: resp.Message,
 	}
 	if resp.ReturnAvailableAt != nil {
-		unstakeResult.ReturnAvailableAt = *resp.ReturnAvailableAt
+		removeResult.ReturnAvailableAt = *resp.ReturnAvailableAt
 	}
-	return unstakeResult
+	return removeResult
+}
+
+func (a *App) removeLocalNodeFiles(installDir, wallet, nodeName, nodeID string) RemoveNodeResult {
+	if a.nodeProc.IsNodeRunning(installDir, nodeName) {
+		if err := a.nodeProc.Stop(installDir, nodeName); err != nil {
+			return RemoveNodeResult{Error: fmt.Sprintf("Failed to stop node: %v", err)}
+		}
+	}
+
+	if err := install.RemoveNodeLocalSetup(installDir, nodeName); err != nil {
+		return RemoveNodeResult{Error: fmt.Sprintf("Failed to delete local node files: %v", err)}
+	}
+
+	if nodeID != "" {
+		_ = a.webClient.LogLocalIdentityRemoved(wallet, nodeID, nodeName)
+	}
+
+	return RemoveNodeResult{
+		OK:      true,
+		Phase:   "local_removed",
+		Message: "Local node files removed. Network registration was already cleared.",
+	}
+}
+
+// UnstakeNode is deprecated; use RemoveNode.
+func (a *App) UnstakeNode(nodeName string) UnstakeNodeResult {
+	return a.RemoveNode(nodeName)
 }
 
 func (a *App) IsNodeRunning() bool {
