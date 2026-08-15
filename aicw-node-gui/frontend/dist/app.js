@@ -16,6 +16,8 @@ const state = {
   stopBusy: false,
   removeConfirmNode: null,
   removeBusy: false,
+  releaseUpdate: null,
+  releaseUpdateCheckedAt: 0,
   logNodeFilter: "all",
   persistentEventsBound: false,
 };
@@ -341,6 +343,18 @@ function renderNodeItem(node, dashboard) {
     </article>`;
 }
 
+function renderUpdateBanner() {
+  const update = state.releaseUpdate;
+  if (!update?.updateAvailable) return "";
+  return `<div class="status-strip status-update">New version <strong>v${escapeHtml(update.latestVersion)}</strong> is available. <button type="button" class="linkish" id="btnOpenRelease">Download update</button></div>`;
+}
+
+function syncUpdateBannerRoot() {
+  const root = document.getElementById("updateBannerRoot");
+  if (!root) return;
+  root.innerHTML = renderUpdateBanner();
+}
+
 function renderStatusStrip(dashboard) {
   if (!dashboard.wallet) return "";
   const max = dashboard.maxConcurrentNodes || 0;
@@ -600,6 +614,12 @@ function bindPersistentEvents() {
 
       const dashboard = state.dashboard || { nodes: [] };
 
+      if (btn.id === "btnOpenRelease") {
+        event.preventDefault();
+        const url = state.releaseUpdate?.releasesUrl;
+        if (url) void call("OpenExternalURL", url);
+        return;
+      }
       if (btn.classList.contains("tab-btn")) {
         event.preventDefault();
         state.tab = btn.dataset.tab;
@@ -814,8 +834,24 @@ async function confirmRemoveNode() {
   await refreshDashboard({ force: true });
 }
 
+async function refreshReleaseUpdate(force = false) {
+  const now = Date.now();
+  if (!force && state.releaseUpdateCheckedAt && now - state.releaseUpdateCheckedAt < 10 * 60 * 1000) {
+    return;
+  }
+  state.releaseUpdateCheckedAt = now;
+  try {
+    const result = await call("CheckReleaseUpdate");
+    state.releaseUpdate = result?.updateAvailable ? result : null;
+  } catch {
+    state.releaseUpdate = null;
+  }
+  syncUpdateBannerRoot();
+}
+
 async function refreshDashboard(options) {
   syncRegisterNodeNameFromDom();
+  await refreshReleaseUpdate(Boolean(options?.force));
   const [dashboard, logs] = await Promise.all([call("GetDashboard"), call("GetNodeLogs")]);
   state.dashboard = dashboard;
   state.logs = logs;
@@ -827,7 +863,7 @@ let pointerIsDown = false;
 let renderQueuedWhilePointerDown = false;
 
 function renderSignature(dashboard) {
-  const parts = [state.tab, state.logNodeFilter, dashboard];
+  const parts = [state.tab, state.logNodeFilter, state.releaseUpdate, dashboard];
   if (state.tab === "logs") {
     parts.push(state.logs?.length ?? 0, state.logs?.[state.logs.length - 1] ?? "");
   }
@@ -901,6 +937,7 @@ async function boot() {
     state.installDir = bootstrap.installDir || bootstrap.defaultInstallDir;
     document.getElementById("versionLabel").textContent = `v${bootstrap.version}`;
     document.getElementById("footerMeta").textContent = bootstrap.webBaseUrl;
+    await refreshReleaseUpdate(true);
     state.step = bootstrap.installed ? "dashboard" : "license";
     render();
   } catch (error) {

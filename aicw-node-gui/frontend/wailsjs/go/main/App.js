@@ -14,6 +14,10 @@ export function GetActionMessage() {
   return window['go']['main']['App']['GetActionMessage']();
 }
 
+export function CheckReleaseUpdate() {
+  return window['go']['main']['App']['CheckReleaseUpdate']();
+}
+
 export function GetBootstrap() {
   return window['go']['main']['App']['GetBootstrap']();
 }
@@ -58,6 +62,10 @@ export function RegisterNode(arg1) {
   return window['go']['main']['App']['RegisterNode'](arg1);
 }
 
+export function RemoveNode(arg1) {
+  return window['go']['main']['App']['RemoveNode'](arg1);
+}
+
 export function RepairInstall() {
   return window['go']['main']['App']['RepairInstall']();
 }
@@ -92,10 +100,6 @@ export function StartNode(arg1) {
 
 export function StopNode(arg1) {
   return window['go']['main']['App']['StopNode'](arg1);
-}
-
-export function RemoveNode(arg1) {
-  return window['go']['main']['App']['RemoveNode'](arg1);
 }
 
 export function UnstakeNode(arg1) {

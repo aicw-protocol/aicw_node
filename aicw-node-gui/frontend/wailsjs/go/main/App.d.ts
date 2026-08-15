@@ -8,6 +8,8 @@ export function EnsureSharedSetup():Promise<main.NodeActionResult>;
 
 export function GetActionMessage():Promise<string>;
 
+export function CheckReleaseUpdate():Promise<main.ReleaseUpdateView>;
+
 export function GetBootstrap():Promise<main.BootstrapView>;
 
 export function GetDashboard():Promise<main.DashboardView>;
@@ -30,6 +32,8 @@ export function OpenInstallFolder():Promise<void>;
 
 export function RegisterNode(arg1:string):Promise<main.RegisterNodeResult>;
 
+export function RemoveNode(arg1:string):Promise<main.UnstakeNodeResult>;
+
 export function RepairInstall():Promise<main.InstallResult>;
 
 export function RunInstall():Promise<main.InstallResult>;
@@ -47,7 +51,5 @@ export function SignOut():Promise<void>;
 export function StartNode(arg1:string):Promise<main.NodeActionResult>;
 
 export function StopNode(arg1:string):Promise<main.NodeActionResult>;
-
-export function RemoveNode(arg1:string):Promise<main.UnstakeNodeResult>;
 
 export function UnstakeNode(arg1:string):Promise<main.UnstakeNodeResult>;

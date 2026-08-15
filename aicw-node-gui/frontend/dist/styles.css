@@ -159,6 +159,14 @@ body {
   max-width: 52rem;
 }
 
+#updateBannerRoot {
+  padding: 0 16px;
+}
+
+#updateBannerRoot:empty {
+  display: none;
+}
+
 .status-strip {
   margin: 12px 0 4px;
   padding: 10px 14px;
@@ -173,6 +181,24 @@ body {
   border-color: #a7f3d0;
   background: #ecfdf5;
   color: #065f46;
+}
+
+.status-strip.status-update {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.status-strip.status-update .linkish {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #b45309;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .toolbar-split {

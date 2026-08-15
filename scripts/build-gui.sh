@@ -59,6 +59,11 @@ EOF
   fi
 fi
 
+GUI_LDFLAGS="-s -w"
+if [ -n "${PRODUCT_VERSION:-}" ]; then
+  GUI_LDFLAGS="-X main.guiVersion=${PRODUCT_VERSION} ${GUI_LDFLAGS}"
+fi
+
 echo "==> Building aicw-node (${platform})"
 pushd "$ROOT" >/dev/null
 if [ "$GOOS" = "darwin" ] && [ "$GOARCH" = "universal" ]; then
@@ -91,7 +96,7 @@ pushd "$GUI_DIR" >/dev/null
 export CGO_ENABLED=1
 
 target_goarch="$TARGET_GOARCH"
-wails_build_args=(-platform "$platform" -clean -skipbindings)
+wails_build_args=(-platform "$platform" -clean -skipbindings -ldflags "$GUI_LDFLAGS")
 if [ "$GOOS" = "linux" ]; then
   wails_build_args+=(-tags webkit2_41)
 fi
@@ -131,7 +136,6 @@ if command -v wails >/dev/null 2>&1; then
     chmod +x "$SETUP_DIST"
   fi
 else
-  ldflags="-s -w"
   go_tags="production"
   if [ "$GOOS" = "linux" ]; then
     go_tags="production,webkit2_41"
@@ -139,8 +143,9 @@ else
   if [ "$GOOS" = "darwin" ] && [ "$target_goarch" = "universal" ]; then
     GOARCH=arm64
   fi
-  if [ "$GOOS" = "windows" ]; then
-    ldflags="-H windowsgui -s -w"
+  ldflags="-H windowsgui ${GUI_LDFLAGS}"
+  if [ "$GOOS" != "windows" ]; then
+    ldflags="${GUI_LDFLAGS}"
   fi
   GOOS="$GOOS" GOARCH="${GOARCH:-$target_goarch}" go build -tags "$go_tags" -trimpath -ldflags="$ldflags" \
     -o "$SETUP_DIST" .

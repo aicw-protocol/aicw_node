@@ -16,11 +16,12 @@ import (
 	"github.com/aicw/aicw_node/aicw-node-gui/internal/nodeidentity"
 	"github.com/aicw/aicw_node/aicw-node-gui/internal/nodeprocess"
 	"github.com/aicw/aicw_node/aicw-node-gui/internal/nodeweb"
+	"github.com/aicw/aicw_node/aicw-node-gui/internal/releases"
 	"github.com/aicw/aicw_node/aicw-node-gui/internal/setupfiles"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const guiVersion = "0.1.27-gui"
+var guiVersion = "0.1.29"
 
 type Session struct {
 	Wallet    string `json:"wallet"`
@@ -178,6 +179,31 @@ func (a *App) GetBootstrap() BootstrapView {
 		view.Wallet = a.session.Wallet
 		view.WalletVerified = a.session.Verified
 	}
+	return view
+}
+
+type ReleaseUpdateView struct {
+	CurrentVersion  string `json:"currentVersion"`
+	LatestVersion   string `json:"latestVersion,omitempty"`
+	TagName         string `json:"tagName,omitempty"`
+	ReleasesURL     string `json:"releasesUrl,omitempty"`
+	UpdateAvailable bool   `json:"updateAvailable"`
+}
+
+func (a *App) CheckReleaseUpdate() ReleaseUpdateView {
+	view := ReleaseUpdateView{
+		CurrentVersion: releases.NormalizeVersion(guiVersion),
+	}
+
+	latest, err := releases.FetchLatestFromNodeWeb(a.webClient.BaseURL, guiVersion, a.webClient.HTTPClient)
+	if err != nil || latest == nil {
+		return view
+	}
+
+	view.LatestVersion = latest.LatestVersion
+	view.TagName = latest.TagName
+	view.ReleasesURL = latest.ReleasesURL
+	view.UpdateAvailable = latest.UpdateAvailable
 	return view
 }
 
