@@ -114,8 +114,9 @@ func (o *Orchestrator) reconcileOnce(ctx context.Context) {
 			continue
 		}
 
-		aReady := countAlive(old, snap.Ready)
-		aPing := countAlive(old, snap.PingActive)
+		reachable := reachableCommittee(old, snap.Whitelist)
+		aReady := countAlive(reachable, snap.Ready)
+		aPing := countAlive(reachable, snap.PingActive)
 		trig := DecideTrigger(threshold, spareTarget, aPing, aReady)
 
 		// §13.6 legacy migration: a healthy committee that is larger than the
@@ -124,7 +125,7 @@ func (o *Orchestrator) reconcileOnce(ctx context.Context) {
 		// not a recovery) to avoid churn. Still rate-limited by cooldown/inflight.
 		if trig == TriggerNone && o.cfg.MigrateOversized {
 			targetSize := o.cfg.Policy.TargetSize(len(pool))
-			if len(old) > targetSize && aReady == len(old) {
+			if len(reachable) > targetSize && aReady == len(reachable) {
 				trig = TriggerMigration
 			}
 		}
@@ -178,7 +179,11 @@ func (o *Orchestrator) reconcileOnce(ctx context.Context) {
 
 // preflightReady enforces auto_reshare_design.md §3.4 / §3.1 step 3.
 func preflightReady(old, newCommittee []string, snap Snapshot, threshold int) bool {
-	if countAlive(old, snap.Ready) < threshold+1 {
+	reachable := reachableCommittee(old, snap.Whitelist)
+	if len(reachable) == 0 {
+		return false
+	}
+	if countAlive(reachable, snap.Ready) < threshold+1 {
 		return false
 	}
 	for _, id := range newCommittee {

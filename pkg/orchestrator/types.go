@@ -67,3 +67,19 @@ func countAlive(committee []string, set map[string]bool) int {
 	}
 	return n
 }
+
+// reachableCommittee returns old-committee members still on the membership
+// whitelist. Offboarded nodes are excluded from liveness/quorum math so a
+// departed peer does not block preflight or trigger evaluation.
+func reachableCommittee(committee []string, whitelist map[string]bool) []string {
+	if len(committee) == 0 || len(whitelist) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(committee))
+	for _, id := range committee {
+		if whitelist[id] {
+			out = append(out, id)
+		}
+	}
+	return out
+}
