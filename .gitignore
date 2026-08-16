@@ -4,6 +4,8 @@
 **/password.txt
 *.key
 *.age
+.secrets/
+deployments/orchestrator-bundle/
 
 # Build artifacts
 *.exe

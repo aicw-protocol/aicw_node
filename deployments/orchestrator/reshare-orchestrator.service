@@ -1,0 +1,28 @@
+[Unit]
+Description=AICW reshare-orchestrator (auto committee recovery)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/aicw/orchestrator
+ExecStart=/opt/aicw/orchestrator/reshare-orchestrator \
+  --network-config /opt/aicw/orchestrator/network-config.yaml \
+  --config /opt/aicw/orchestrator/orchestrator-config.yaml
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=reshare-orchestrator
+
+# Hardening (adjust if your distro blocks these)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/aicw/orchestrator
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+# reshare-orchestrator runtime config (testnet VPS).
+# committee_policy is loaded from --network-config (deployments/orchestrator/network-config.yaml).
+
+nats:
+  url: "nats://158.247.251.191:4222"
+
+consul:
+  address: "158.247.251.191:8500"
+
+environment: development
+
+event_initiator_algorithm: ed25519
+
+orchestrator:
+  scan_interval_seconds: 60
+  ecdh_gate:
+    timeout_seconds: 120
+  cooldown_success_minutes: 30
+  cooldown_failure_minutes: 5
+  cooldown_failure_max_minutes: 60
+  global_max_inflight: 3
+  reshare_result_timeout_minutes: 10
+  inflight_lock_ttl_minutes: 15
+  confirm_dead_scans: 2
+  migrate_oversized: false
+  event_initiator_key_path: "/opt/aicw/secrets/reshare_initiator.key"
+  authorizers:
+    request_timeout_seconds: 10
+    list: []
+
+node_web:
+  url: "https://node.aicw.ai"

@@ -1,0 +1,47 @@
+# Shared network config for AICW testnet (orchestrator + nodes must match byte-for-byte
+# on committee_policy and reshare_initiator_pubkey).
+
+environment: development
+event_initiator_algorithm: ed25519
+event_initiator_pubkey: "085e3dd81362735e85deba4745751bb2fe2f947ab223be27d412f5adfced963d"
+reshare_initiator_pubkey: "50eb1f85764d23d1828cd2a274b8b21189e05ebfe13ab54264a803e2e8d76232"
+chain_code: "5c22c2856d3657a2835bfb05cb2a6dbc9456f9d582550f9f6c06670417ee4086"
+
+nats:
+  url: "nats://158.247.251.191:4222"
+
+consul:
+  address: "158.247.251.191:8500"
+
+mpc_threshold: 2
+
+eligibility:
+  membership:
+    mode: whitelist
+    source: consul
+    consul_path: mpc_eligibility/membership_whitelist/
+
+committee_policy:
+  version: "2"
+  cap: 7
+  mpc_threshold: 2
+  keygen_filter_enabled: true
+  tiers:
+    - max_active: 4
+      committee_size: 3
+      spare: 0
+    - max_active: 10
+      committee_size: 4
+      spare: 1
+    - max_active: 30
+      committee_size: 5
+      spare: 2
+    - max_active: 100
+      committee_size: 6
+      spare: 3
+    - max_active: 999999
+      committee_size: 7
+      spare: 4
+
+ecdh_gate:
+  timeout_seconds: 120
