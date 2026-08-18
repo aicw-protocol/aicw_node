@@ -95,6 +95,25 @@ func (o *Orchestrator) reconcileOnce(ctx context.Context) {
 	threshold := o.cfg.Policy.MPCThreshold
 	_, spareTarget := o.cfg.Policy.TierFor(len(pool))
 
+	var scanned, healthy, deferred, triggered, unrecoverable int
+	readyNodes := 0
+	for _, ready := range snap.Ready {
+		if ready {
+			readyNodes++
+		}
+	}
+	defer func() {
+		logger.Info("Reconcile scan summary",
+			"wallets", scanned,
+			"healthy", healthy,
+			"deferred", deferred,
+			"triggered", triggered,
+			"unrecoverable", unrecoverable,
+			"ready_nodes", readyNodes,
+			"active_inflight", atomic.LoadInt64(&o.active),
+		)
+	}()
+
 	for _, w := range wallets {
 		if atomic.LoadInt64(&o.active) >= int64(o.cfg.GlobalMaxInflight) {
 			return // saturated for this scan
@@ -104,13 +123,16 @@ func (o *Orchestrator) reconcileOnce(ctx context.Context) {
 		if len(old) == 0 {
 			continue
 		}
+		scanned++
 
 		// §5E: never auto-reshare a wallet flagged frozen (unexpected pubkey change).
 		if frozen, ferr := o.verifier.IsFrozen(w.ID); ferr != nil {
 			logger.Error("Reconcile: freeze check failed", ferr, "walletID", w.ID)
+			deferred++
 			continue
 		} else if frozen {
 			logger.Warn("Reconcile: wallet is frozen; skipping (operator intervention required)", "walletID", w.ID)
+			deferred++
 			continue
 		}
 
@@ -133,16 +155,24 @@ func (o *Orchestrator) reconcileOnce(ctx context.Context) {
 		if trig == TriggerUnrecoverable {
 			logger.Warn("Wallet committee unrecoverable (a_r==0); auto-reshare cannot help",
 				"walletID", w.ID, "old_committee", old)
+			unrecoverable++
 			continue
 		}
 		if !o.confirm.observe(w.ID, trig) {
+			if trig == TriggerNone {
+				healthy++
+			} else {
+				deferred++
+			}
 			continue
 		}
 
 		if ok, err := o.lock.CooldownOK(w.ID); err != nil {
 			logger.Error("Reconcile: cooldown check failed", err, "walletID", w.ID)
+			deferred++
 			continue
 		} else if !ok {
+			deferred++
 			continue
 		}
 
@@ -150,6 +180,7 @@ func (o *Orchestrator) reconcileOnce(ctx context.Context) {
 		plan, err := o.cfg.Policy.SelectCommittee(w.ID, old, pool)
 		if err != nil {
 			logger.Warn("Reconcile: committee selection failed", "walletID", w.ID, "error", err.Error())
+			deferred++
 			continue
 		}
 
@@ -159,6 +190,7 @@ func (o *Orchestrator) reconcileOnce(ctx context.Context) {
 			logger.Warn("Reconcile: pre-flight not ready; deferring reshare (MPC not ready)",
 				"walletID", w.ID, "trigger", trig.String(),
 				"old_ready", aReady, "new_committee", plan.NodeIDs)
+			deferred++
 			continue
 		}
 
@@ -166,12 +198,15 @@ func (o *Orchestrator) reconcileOnce(ctx context.Context) {
 		acquired, err := o.lock.Acquire(w.ID, sessionID, []string{string(KeyKindEddsa), string(KeyKindEcdsa)})
 		if err != nil {
 			logger.Error("Reconcile: lock acquire failed", err, "walletID", w.ID)
+			deferred++
 			continue
 		}
 		if !acquired {
+			deferred++
 			continue // another attempt already in-flight
 		}
 
+		triggered++
 		atomic.AddInt64(&o.active, 1)
 		go o.runReshare(ctx, w, old, plan, snap, sessionID, trig)
 	}
