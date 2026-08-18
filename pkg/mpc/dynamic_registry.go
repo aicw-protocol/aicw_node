@@ -31,6 +31,13 @@ const ECDHBroadcastPeriod = 3 * time.Second
 // it. Consul may take up to twice the TTL to reap an expired session.
 const ReadySessionTTL = 30 * time.Second
 
+// readyReregisterBackoffMin/Max bound delays between ready/ re-registration
+// attempts after the Consul session renewal loop stops.
+const (
+	readyReregisterBackoffMin = 5 * time.Second
+	readyReregisterBackoffMax = 60 * time.Second
+)
+
 // DynamicPeerRegistry extends PeerRegistry with dynamic peer management.
 //
 // AICW-FORK: New interface that supports runtime peer additions/removals.
@@ -342,8 +349,8 @@ func (r *DynamicRegistry) WatchPeerDirectory() error {
 	})
 }
 
-// createReadySession opens a TTL session whose expiry deletes the ready/ key,
-// and keeps it alive for as long as the node runs.
+// createReadySession opens a TTL session whose expiry deletes the ready/ key.
+// Renewal is driven by maintainReadySession(), not here.
 func (r *DynamicRegistry) createReadySession() (string, error) {
 	sessionID, _, err := r.consulClient.Session().Create(&api.SessionEntry{
 		Name:      fmt.Sprintf("node-ready-%s", r.nodeID),
@@ -361,15 +368,100 @@ func (r *DynamicRegistry) createReadySession() (string, error) {
 	r.readySessionStopCh = stopCh
 	r.mu.Unlock()
 
-	go func() {
-		if err := r.consulClient.Session().RenewPeriodic(
+	return sessionID, nil
+}
+
+// registerReady creates a Consul session and acquires the ready/ key for this node.
+func (r *DynamicRegistry) registerReady() error {
+	if r.consulClient == nil {
+		return fmt.Errorf("consul client not configured")
+	}
+
+	sessionID, err := r.createReadySession()
+	if err != nil {
+		return err
+	}
+
+	key := fmt.Sprintf("ready/%s", r.nodeID)
+	epoch := strconv.FormatInt(time.Now().UnixNano(), 10)
+	acquired, _, err := r.consulClient.KV().Acquire(&api.KVPair{
+		Key:     key,
+		Value:   []byte(epoch),
+		Session: sessionID,
+	}, nil)
+	if err != nil {
+		return fmt.Errorf("failed to set ready key: %w", err)
+	}
+	if !acquired {
+		if _, derr := r.consulClient.KV().Delete(key, nil); derr != nil {
+			return fmt.Errorf("failed to clear stale ready key: %w", derr)
+		}
+		if _, _, err := r.consulClient.KV().Acquire(&api.KVPair{
+			Key:     key,
+			Value:   []byte(epoch),
+			Session: sessionID,
+		}, nil); err != nil {
+			return fmt.Errorf("failed to set ready key: %w", err)
+		}
+	}
+	return nil
+}
+
+func nextReadyReregisterBackoff(current time.Duration) time.Duration {
+	next := current * 2
+	if next > readyReregisterBackoffMax {
+		return readyReregisterBackoffMax
+	}
+	return next
+}
+
+// maintainReadySession keeps the ready/ key alive and re-registers after session loss.
+func (r *DynamicRegistry) maintainReadySession() {
+	for {
+		r.mu.RLock()
+		sessionID := r.readySessionID
+		stopCh := r.readySessionStopCh
+		r.mu.RUnlock()
+
+		if sessionID == "" || stopCh == nil {
+			return
+		}
+
+		err := r.consulClient.Session().RenewPeriodic(
 			ReadySessionTTL.String(), sessionID, nil, stopCh,
-		); err != nil {
+		)
+
+		select {
+		case <-r.watchStopCh:
+			return
+		default:
+		}
+
+		if err != nil {
 			logger.Warn("Ready session renewal stopped", "nodeID", r.nodeID, "error", err.Error())
 		}
-	}()
+		logger.Warn("ready session lost; re-registering", "nodeID", r.nodeID)
 
-	return sessionID, nil
+		backoff := readyReregisterBackoffMin
+		for {
+			select {
+			case <-r.watchStopCh:
+				return
+			default:
+			}
+
+			if err := r.registerReady(); err == nil {
+				break
+			}
+
+			select {
+			case <-r.watchStopCh:
+				return
+			case <-time.After(backoff):
+			}
+			backoff = nextReadyReregisterBackoff(backoff)
+		}
+	}
 }
 
 // Ready marks this node as ready in Consul.
@@ -396,36 +488,11 @@ func (r *DynamicRegistry) Ready() error {
 		r.ensurePeriodicECDHBroadcast()
 	}
 
-	sessionID, err := r.createReadySession()
-	if err != nil {
+	if err := r.registerReady(); err != nil {
 		return err
 	}
 
-	key := fmt.Sprintf("ready/%s", r.nodeID)
-	epoch := strconv.FormatInt(time.Now().UnixNano(), 10)
-	acquired, _, err := r.consulClient.KV().Acquire(&api.KVPair{
-		Key:     key,
-		Value:   []byte(epoch),
-		Session: sessionID,
-	}, nil)
-
-	if err != nil {
-		return fmt.Errorf("failed to set ready key: %w", err)
-	}
-	if !acquired {
-		// A previous session still holds the key: force-release it, since only
-		// this node ever writes its own ready/ entry.
-		if _, derr := r.consulClient.KV().Delete(key, nil); derr != nil {
-			return fmt.Errorf("failed to clear stale ready key: %w", derr)
-		}
-		if _, _, err := r.consulClient.KV().Acquire(&api.KVPair{
-			Key:     key,
-			Value:   []byte(epoch),
-			Session: sessionID,
-		}, nil); err != nil {
-			return fmt.Errorf("failed to set ready key: %w", err)
-		}
-	}
+	go r.maintainReadySession()
 
 	// Start watching for peer readiness
 	go r.watchPeersReady()
