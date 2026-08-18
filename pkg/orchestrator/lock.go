@@ -3,9 +3,11 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/fystack/mpcium/pkg/logger"
 	"github.com/hashicorp/consul/api"
 )
 
@@ -145,6 +147,72 @@ func (m *LockManager) Acquire(walletID, sessionID string, keyTypes []string) (bo
 
 // Release frees the in-flight lock for a wallet (deletes the key, which also
 // releases the session hold).
+// decideInflightSweep reports whether a stale inflight KV entry should be deleted.
+func decideInflightSweep(rec *inflightRecord, corrupt, held bool, now, deadline time.Time) bool {
+	if corrupt {
+		return true
+	}
+	if held {
+		return false
+	}
+	if rec == nil {
+		return true
+	}
+	return !now.Before(deadline)
+}
+
+// SweepStale deletes inflight locks older than maxAge. Keys held by this instance
+// (m.held) are never removed. Returns the number of keys deleted.
+func (m *LockManager) SweepStale(maxAge time.Duration) (int, error) {
+	pairs, _, err := m.kv.List(inflightPrefix, nil)
+	if err != nil {
+		return 0, fmt.Errorf("sweeper: list inflight: %w", err)
+	}
+
+	now := time.Now().UTC()
+	deleted := 0
+
+	for _, pair := range pairs {
+		if pair == nil {
+			continue
+		}
+		walletID := strings.TrimPrefix(pair.Key, inflightPrefix)
+		if walletID == "" || walletID == pair.Key {
+			continue
+		}
+
+		m.mu.Lock()
+		held := m.held[walletID]
+		m.mu.Unlock()
+
+		var rec inflightRecord
+		corrupt := json.Unmarshal(pair.Value, &rec) != nil
+		deadline := now
+		if !corrupt {
+			deadline = rec.StartedAt.Add(maxAge)
+		}
+
+		if !decideInflightSweep(&rec, corrupt, held, now, deadline) {
+			continue
+		}
+
+		if _, err := m.kv.Delete(pair.Key, nil); err != nil {
+			return deleted, fmt.Errorf("sweeper: delete %q: %w", pair.Key, err)
+		}
+		deleted++
+
+		if corrupt {
+			logger.Warn("sweeper: released stale inflight",
+				"walletID", walletID, "started_at", "corrupt", "age", "unknown")
+		} else {
+			logger.Warn("sweeper: released stale inflight",
+				"walletID", walletID, "started_at", rec.StartedAt, "age", now.Sub(rec.StartedAt))
+		}
+	}
+
+	return deleted, nil
+}
+
 func (m *LockManager) Release(walletID string) error {
 	m.mu.Lock()
 	delete(m.held, walletID)

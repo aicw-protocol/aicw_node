@@ -187,4 +187,10 @@ node_web:
 	if c.GlobalMaxInflight != 3 {
 		t.Errorf("default GlobalMaxInflight = %d, want 3", c.GlobalMaxInflight)
 	}
+	if c.SweepEnabled {
+		t.Error("default SweepEnabled = true, want false")
+	}
+	if c.SweepInterval != 300*time.Second {
+		t.Errorf("default SweepInterval = %v, want 300s", c.SweepInterval)
+	}
 }

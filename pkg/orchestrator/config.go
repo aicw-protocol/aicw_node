@@ -58,6 +58,10 @@ type Config struct {
 	ReshareResultTimeout time.Duration // per key type
 	InflightLockTTL      time.Duration
 
+	// Inflight stale sweeper — optional; off by default (hardening-tasks-composer §1).
+	SweepEnabled   bool
+	SweepInterval  time.Duration
+
 	// Hysteresis (§3.3).
 	ConfirmDeadScans int
 
@@ -102,6 +106,7 @@ func defaultConfig() Config {
 		GlobalMaxInflight:       3,
 		ReshareResultTimeout:    10 * time.Minute,
 		InflightLockTTL:         15 * time.Minute,
+		SweepInterval:           300 * time.Second,
 		ConfirmDeadScans:        2,
 		EventInitiatorAlgorithm: "ed25519",
 	}
@@ -136,6 +141,10 @@ func LoadConfigFromViper() (Config, error) {
 	}
 	if v := viper.GetInt("orchestrator.inflight_lock_ttl_minutes"); v > 0 {
 		c.InflightLockTTL = time.Duration(v) * time.Minute
+	}
+	c.SweepEnabled = viper.GetBool("orchestrator.inflight_sweep_enabled")
+	if v := viper.GetInt("orchestrator.inflight_sweep_interval_seconds"); v > 0 {
+		c.SweepInterval = time.Duration(v) * time.Second
 	}
 	if v := viper.GetInt("orchestrator.confirm_dead_scans"); v > 0 {
 		c.ConfirmDeadScans = v

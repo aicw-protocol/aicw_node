@@ -129,6 +129,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	orchestrator.StartInflightSweeper(ctx, lock, cfg)
+
 	orch.Run(ctx)
 }
 
