@@ -82,12 +82,79 @@ func NewLockManager(client *api.Client, ttl, cooldownSuccess, cooldownFailure, c
 		held:            make(map[string]bool),
 	}
 
-	go func() {
-		// RenewPeriodic renews at ttl/2 until renewDone is closed.
-		_ = sessions.RenewPeriodic(ttlStr, sessionID, nil, m.renewDone)
-	}()
+	go m.maintainLockSession()
 
 	return m, nil
+}
+
+func (m *LockManager) currentSessionID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sessionID
+}
+
+func (m *LockManager) maintainLockSession() {
+	ttlStr := fmt.Sprintf("%ds", int(m.ttl.Seconds()))
+	for {
+		sessionID := m.currentSessionID()
+		if sessionID == "" {
+			return
+		}
+
+		_ = m.sessions.RenewPeriodic(ttlStr, sessionID, nil, m.renewDone)
+
+		select {
+		case <-m.renewDone:
+			return
+		default:
+		}
+
+		logger.Warn("orchestrator lock session lost; recreating")
+
+		var newSessionID string
+		backoff := 5 * time.Second
+		for {
+			select {
+			case <-m.renewDone:
+				return
+			default:
+			}
+
+			id, _, err := m.sessions.Create(&api.SessionEntry{
+				Name:      lockSessionName,
+				TTL:       ttlStr,
+				Behavior:  api.SessionBehaviorDelete,
+				LockDelay: 0,
+			}, nil)
+			if err == nil {
+				newSessionID = id
+				break
+			}
+
+			select {
+			case <-m.renewDone:
+				return
+			case <-time.After(backoff):
+			}
+			if backoff < 60*time.Second {
+				backoff *= 2
+				if backoff > 60*time.Second {
+					backoff = 60 * time.Second
+				}
+			}
+		}
+
+		m.mu.Lock()
+		dropped := len(m.held)
+		m.sessionID = newSessionID
+		// Session behavior=delete: when the old session expired, Consul already
+		// removed every inflight key it held. Clearing local held avoids wallets
+		// being stuck as "in progress" on this instance forever.
+		m.held = make(map[string]bool)
+		m.mu.Unlock()
+
+		logger.Warn("orchestrator lock session recreated; local held-locks cleared", "dropped", dropped)
+	}
 }
 
 // Close stops session renewal and destroys the Consul session, which (with
@@ -99,8 +166,9 @@ func (m *LockManager) Close() {
 	default:
 		close(m.renewDone)
 	}
-	if m.sessions != nil && m.sessionID != "" {
-		_, _ = m.sessions.Destroy(m.sessionID, nil)
+	sessionID := m.currentSessionID()
+	if m.sessions != nil && sessionID != "" {
+		_, _ = m.sessions.Destroy(sessionID, nil)
 	}
 }
 
@@ -130,7 +198,7 @@ func (m *LockManager) Acquire(walletID, sessionID string, keyTypes []string) (bo
 	acquired, _, err := m.kv.Acquire(&api.KVPair{
 		Key:     key,
 		Value:   val,
-		Session: m.sessionID,
+		Session: m.currentSessionID(),
 	}, nil)
 	if err != nil {
 		return false, fmt.Errorf("lock: acquire %q: %w", key, err)
