@@ -373,6 +373,16 @@ func runNode(ctx context.Context, c *cli.Command) error {
 		dynamicStore,    // DynamicFileStore implements identity.Store
 		ckd,
 	)
+	// AICW-FORK (production-gaps-review.md G-5): block signing while orchestrator
+	// holds orchestrator/reshare/inflight/{walletID} (see aicw_node/pkg/orchestrator/lock.go inflightPrefix).
+	inflightKV := consulClient.KV()
+	mpcNode.SetReshareInflightChecker(func(walletID string) (bool, error) {
+		pair, _, err := inflightKV.Get("orchestrator/reshare/inflight/"+walletID, nil)
+		if err != nil {
+			return false, err
+		}
+		return pair != nil, nil
+	})
 	defer mpcNode.Close()
 
 	// === Original: Event consumers (unchanged) ===
