@@ -19,6 +19,7 @@ func TestPreflightReadyIgnoresOffboardedOldMembers(t *testing.T) {
 			"a": true,
 			"b": true,
 			"c": true,
+			"d": true,
 		},
 		Whitelist: map[string]bool{
 			"a": true,
@@ -28,19 +29,21 @@ func TestPreflightReadyIgnoresOffboardedOldMembers(t *testing.T) {
 	}
 	newCommittee := []string{"a", "b", "c", "d"}
 
-	// departed not ready/whitelisted; 3 reachable old members ready >= threshold+1 (3).
+	// departed not ready/whitelisted; 3 reachable old members ready >= threshold+1 (3)
+	// and the whole new committee is ready.
 	if !preflightReady(old, newCommittee, snap, 2) {
 		t.Fatal("preflightReady should pass when offboarded peer is excluded from old quorum")
 	}
 
-	snap.Ready["d"] = true
-	if !preflightReady(old, newCommittee, snap, 2) {
-		t.Fatal("preflightReady should pass when new committee is ready")
-	}
-
-	snap.Ready["c"] = false
+	snap.Ready["d"] = false
 	if preflightReady(old, newCommittee, snap, 2) {
 		t.Fatal("preflightReady should fail when a new committee member is not ready")
+	}
+
+	snap.Ready["d"] = true
+	snap.Ready["c"] = false
+	if preflightReady(old, newCommittee, snap, 2) {
+		t.Fatal("preflightReady should fail when old quorum drops below threshold+1")
 	}
 }
 

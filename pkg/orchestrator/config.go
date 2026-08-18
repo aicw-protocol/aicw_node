@@ -59,8 +59,8 @@ type Config struct {
 	InflightLockTTL      time.Duration
 
 	// Inflight stale sweeper — optional; off by default (hardening-tasks-composer §1).
-	SweepEnabled   bool
-	SweepInterval  time.Duration
+	SweepEnabled  bool
+	SweepInterval time.Duration
 
 	// Hysteresis (§3.3).
 	ConfirmDeadScans int
