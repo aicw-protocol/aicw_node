@@ -4,11 +4,11 @@ import {main} from '../models';
 
 export function AcceptLicense():Promise<void>;
 
+export function CheckReleaseUpdate():Promise<main.ReleaseUpdateView>;
+
 export function EnsureSharedSetup():Promise<main.NodeActionResult>;
 
 export function GetActionMessage():Promise<string>;
-
-export function CheckReleaseUpdate():Promise<main.ReleaseUpdateView>;
 
 export function GetBootstrap():Promise<main.BootstrapView>;
 

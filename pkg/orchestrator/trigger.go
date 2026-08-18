@@ -47,16 +47,20 @@ func (t Trigger) String() string {
 //
 //	aReady == 0                                  -> Unrecoverable
 //	0 < aReady < minSign                         -> Urgent
-//	aReady >= minSign && aPing < minSign+spare   -> Proactive
+//	aReady >= minSign && aReady < minSign+spare  -> Proactive
 //	otherwise                                    -> None
+//
+// Spare is measured on ready (MPC gate), not ping: node_web ping can lag ~5m
+// after a graceful stop while Consul ready/ is cleared immediately.
 func DecideTrigger(threshold, spareTarget, aPing, aReady int) Trigger {
+	_ = aPing // retained for audit/logging; proactive uses ready spare only
 	minSign := threshold + 1
 	switch {
 	case aReady == 0:
 		return TriggerUnrecoverable
 	case aReady < minSign:
 		return TriggerUrgent
-	case aPing < minSign+spareTarget:
+	case aReady < minSign+spareTarget:
 		return TriggerProactive
 	default:
 		return TriggerNone

@@ -22,7 +22,7 @@ orchestrator:
   reshare_result_timeout_minutes: 10
   inflight_lock_ttl_minutes: 15
   confirm_dead_scans: 2
-  migrate_oversized: false
+  migrate_oversized: true
   event_initiator_key_path: "/opt/aicw/secrets/reshare_initiator.key"
   authorizers:
     request_timeout_seconds: 10

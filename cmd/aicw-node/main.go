@@ -428,38 +428,68 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	})
 	defer stopNodeWebPing()
 
+	stopPath := filepath.Join("run", nodeName+".stop")
+	if err := os.MkdirAll(filepath.Dir(stopPath), 0o755); err != nil {
+		logger.Warn("Could not create run dir for graceful stop file", "error", err)
+	}
+
+	var shutdownOnce sync.Once
+	performShutdown := func(reason string) {
+		shutdownOnce.Do(func() {
+			logger.Warn("Shutdown requested", "reason", reason)
+			cancel()
+
+			if healthServer != nil {
+				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer shutdownCancel()
+				if err := healthServer.Shutdown(shutdownCtx); err != nil {
+					logger.Error("Failed to shutdown health check server", err)
+				}
+			}
+
+			if err := dynamicRegistry.Resign(); err != nil {
+				logger.Error("Failed to resign from peer registry", err)
+			}
+
+			// AICW-FORK: Stop peer directory watch
+			dynamicStore.StopWatch()
+
+			if err := keygenConsumer.Close(); err != nil {
+				logger.Error("Failed to close keygen consumer", err)
+			}
+			if err := signingConsumer.Close(); err != nil {
+				logger.Error("Failed to close signing consumer", err)
+			}
+
+			err := natsConn.Drain()
+			if err != nil {
+				logger.Error("Failed to drain NATS connection", err)
+			}
+		})
+	}
+
 	go func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 		<-sigChan
-		logger.Warn("Shutdown signal received, canceling context...")
-		cancel()
+		performShutdown("signal")
+	}()
 
-		if healthServer != nil {
-			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer shutdownCancel()
-			if err := healthServer.Shutdown(shutdownCtx); err != nil {
-				logger.Error("Failed to shutdown health check server", err)
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-appContext.Done():
+				return
+			case <-ticker.C:
+				if _, err := os.Stat(stopPath); err != nil {
+					continue
+				}
+				_ = os.Remove(stopPath)
+				performShutdown("stop file")
+				return
 			}
-		}
-
-		if err := dynamicRegistry.Resign(); err != nil {
-			logger.Error("Failed to resign from peer registry", err)
-		}
-
-		// AICW-FORK: Stop peer directory watch
-		dynamicStore.StopWatch()
-
-		if err := keygenConsumer.Close(); err != nil {
-			logger.Error("Failed to close keygen consumer", err)
-		}
-		if err := signingConsumer.Close(); err != nil {
-			logger.Error("Failed to close signing consumer", err)
-		}
-
-		err := natsConn.Drain()
-		if err != nil {
-			logger.Error("Failed to drain NATS connection", err)
 		}
 	}()
 

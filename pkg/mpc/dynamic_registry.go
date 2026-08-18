@@ -17,6 +17,7 @@ import (
 	"github.com/aicw/aicw_node/pkg/committee"
 	"github.com/aicw/aicw_node/pkg/eligibility"
 	"github.com/aicw/aicw_node/pkg/identity"
+	"github.com/fystack/mpcium/pkg/logger"
 )
 
 // ReadinessCheckPeriod is how often to check peer readiness.
@@ -25,6 +26,10 @@ const ReadinessCheckPeriod = 1 * time.Second
 // ECDHBroadcastPeriod is how often to re-broadcast ECDH public key
 // until key exchange is complete with all peers.
 const ECDHBroadcastPeriod = 3 * time.Second
+
+// ReadySessionTTL bounds how long a ready/ entry outlives the node that wrote
+// it. Consul may take up to twice the TTL to reap an expired session.
+const ReadySessionTTL = 30 * time.Second
 
 // DynamicPeerRegistry extends PeerRegistry with dynamic peer management.
 //
@@ -135,6 +140,14 @@ type DynamicRegistry struct {
 
 	// Watch control
 	watchStopCh chan struct{}
+	resignOnce  sync.Once
+
+	// AICW-FORK: Consul session backing the ready/ key. The key is acquired
+	// through this session with delete-on-expiry behavior, so a crash, kill -9
+	// or power loss retires the node from the ready set without any operator
+	// action. Resign() still removes it immediately on a clean shutdown.
+	readySessionID     string
+	readySessionStopCh chan struct{}
 
 	// AICW-FORK: ECDH periodic broadcast control
 	ecdhBroadcastStopCh chan struct{}
@@ -329,6 +342,36 @@ func (r *DynamicRegistry) WatchPeerDirectory() error {
 	})
 }
 
+// createReadySession opens a TTL session whose expiry deletes the ready/ key,
+// and keeps it alive for as long as the node runs.
+func (r *DynamicRegistry) createReadySession() (string, error) {
+	sessionID, _, err := r.consulClient.Session().Create(&api.SessionEntry{
+		Name:      fmt.Sprintf("node-ready-%s", r.nodeID),
+		TTL:       ReadySessionTTL.String(),
+		Behavior:  api.SessionBehaviorDelete,
+		LockDelay: 1 * time.Millisecond,
+	}, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create ready session: %w", err)
+	}
+
+	stopCh := make(chan struct{})
+	r.mu.Lock()
+	r.readySessionID = sessionID
+	r.readySessionStopCh = stopCh
+	r.mu.Unlock()
+
+	go func() {
+		if err := r.consulClient.Session().RenewPeriodic(
+			ReadySessionTTL.String(), sessionID, nil, stopCh,
+		); err != nil {
+			logger.Warn("Ready session renewal stopped", "nodeID", r.nodeID, "error", err.Error())
+		}
+	}()
+
+	return sessionID, nil
+}
+
 // Ready marks this node as ready in Consul.
 func (r *DynamicRegistry) Ready() error {
 	if r.consulClient == nil {
@@ -353,15 +396,35 @@ func (r *DynamicRegistry) Ready() error {
 		r.ensurePeriodicECDHBroadcast()
 	}
 
+	sessionID, err := r.createReadySession()
+	if err != nil {
+		return err
+	}
+
 	key := fmt.Sprintf("ready/%s", r.nodeID)
 	epoch := strconv.FormatInt(time.Now().UnixNano(), 10)
-	_, err := r.consulClient.KV().Put(&api.KVPair{
-		Key:   key,
-		Value: []byte(epoch),
+	acquired, _, err := r.consulClient.KV().Acquire(&api.KVPair{
+		Key:     key,
+		Value:   []byte(epoch),
+		Session: sessionID,
 	}, nil)
 
 	if err != nil {
 		return fmt.Errorf("failed to set ready key: %w", err)
+	}
+	if !acquired {
+		// A previous session still holds the key: force-release it, since only
+		// this node ever writes its own ready/ entry.
+		if _, derr := r.consulClient.KV().Delete(key, nil); derr != nil {
+			return fmt.Errorf("failed to clear stale ready key: %w", derr)
+		}
+		if _, _, err := r.consulClient.KV().Acquire(&api.KVPair{
+			Key:     key,
+			Value:   []byte(epoch),
+			Session: sessionID,
+		}, nil); err != nil {
+			return fmt.Errorf("failed to set ready key: %w", err)
+		}
 	}
 
 	// Start watching for peer readiness
@@ -495,27 +558,44 @@ func (r *DynamicRegistry) handleECDHRejoin(peerID string) {
 
 // Resign removes this node from Consul.
 func (r *DynamicRegistry) Resign() error {
-	if r.consulClient == nil {
-		return nil
-	}
+	var resignErr error
+	r.resignOnce.Do(func() {
+		if r.consulClient == nil {
+			return
+		}
 
-	// Stop periodic ECDH broadcast
-	select {
-	case <-r.ecdhBroadcastStopCh:
-		// Already closed
-	default:
-		close(r.ecdhBroadcastStopCh)
-	}
+		select {
+		case <-r.ecdhBroadcastStopCh:
+		default:
+			close(r.ecdhBroadcastStopCh)
+		}
 
-	close(r.watchStopCh)
+		close(r.watchStopCh)
 
-	key := fmt.Sprintf("ready/%s", r.nodeID)
-	_, err := r.consulClient.KV().Delete(key, nil)
-	if err != nil {
-		return fmt.Errorf("failed to delete ready key: %w", err)
-	}
+		r.mu.Lock()
+		sessionID := r.readySessionID
+		stopCh := r.readySessionStopCh
+		r.readySessionID = ""
+		r.readySessionStopCh = nil
+		r.mu.Unlock()
 
-	return nil
+		if stopCh != nil {
+			close(stopCh)
+		}
+
+		key := fmt.Sprintf("ready/%s", r.nodeID)
+		_, err := r.consulClient.KV().Delete(key, nil)
+		if err != nil {
+			resignErr = fmt.Errorf("failed to delete ready key: %w", err)
+		}
+
+		if sessionID != "" {
+			if _, derr := r.consulClient.Session().Destroy(sessionID, nil); derr != nil && resignErr == nil {
+				resignErr = fmt.Errorf("failed to destroy ready session: %w", derr)
+			}
+		}
+	})
+	return resignErr
 }
 
 // watchPeersReady monitors Consul for peer readiness changes.
@@ -835,8 +915,8 @@ func (r *DynamicRegistry) SetCommitteePolicy(p committee.Policy) {
 // GetReadyPeersIncludeSelf() as the keygen party source (§13.5). Committee
 // selection is deterministic (committee.SelectCommittee), so every node that
 // shares the same ready view computes the same committee — a hard requirement
-// since the committee is not carried in the keygen message. On any selection
-// error it falls back to the full ready set (never worse than legacy).
+// since the committee is not carried in the keygen message. On selection error
+// with filtering enabled it returns nil (never the full ready set).
 func (r *DynamicRegistry) GetKeygenParty(walletID string) []string {
 	ready := r.GetReadyPeersIncludeSelf()
 
@@ -846,8 +926,16 @@ func (r *DynamicRegistry) GetKeygenParty(walletID string) []string {
 
 	plan, err := r.committeePolicy.SelectCommittee(walletID, nil, ready)
 	if err != nil {
-		fmt.Printf("warning: committee selection failed for wallet %s (%v); using full ready set\n", walletID, err)
-		return ready
+		// Never fall back to the full ready set when filtering is enabled —
+		// an oversized keygen party triggers immediate migrate_oversized churn
+		// and breaks post-reshare signing (Consul v2 without usable Badger v2).
+		logger.Error(
+			"committee selection failed for keygen; refusing oversized party",
+			err,
+			"walletID", walletID,
+			"readyCount", len(ready),
+		)
+		return nil
 	}
 	return plan.NodeIDs
 }

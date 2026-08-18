@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aicw/aicw_node/aicw-node-gui/internal/install"
 )
@@ -21,6 +22,8 @@ var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 // MaxConcurrentNodes limits how many node processes one GUI may start.
 // Zero means no limit.
 const MaxConcurrentNodes = 0
+
+const gracefulStopTimeout = 15 * time.Second
 
 type nodeProcess struct {
 	cmd *exec.Cmd
@@ -49,6 +52,41 @@ func runDir(installDir string) string {
 
 func pidFilePath(installDir, nodeName string) string {
 	return filepath.Join(runDir(installDir), nodeName+".pid")
+}
+
+func stopFilePath(installDir, nodeName string) string {
+	return filepath.Join(runDir(installDir), nodeName+".stop")
+}
+
+func requestGracefulStop(installDir, nodeName string) {
+	if installDir == "" || strings.TrimSpace(nodeName) == "" {
+		return
+	}
+	if err := os.MkdirAll(runDir(installDir), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(stopFilePath(installDir, nodeName), []byte("stop\n"), 0o644)
+}
+
+func removeStopFile(installDir, nodeName string) {
+	if installDir == "" || strings.TrimSpace(nodeName) == "" {
+		return
+	}
+	_ = os.Remove(stopFilePath(installDir, nodeName))
+}
+
+func waitProcessExit(pid int, timeout time.Duration) bool {
+	if pid <= 0 {
+		return true
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !processAlive(pid) {
+			return true
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return !processAlive(pid)
 }
 
 func writePIDFile(installDir, nodeName string, pid int) {
@@ -347,11 +385,20 @@ func (m *Manager) Stop(installDir, nodeName string) error {
 	}
 
 	var lastErr error
+	for _, name := range targets {
+		if name != "" {
+			requestGracefulStop(installDir, name)
+		}
+	}
 	for pid, name := range targets {
-		if err := terminateProcess(pid); err != nil && lastErr == nil {
-			lastErr = err
+		exited := waitProcessExit(pid, gracefulStopTimeout)
+		if !exited {
+			if err := terminateProcess(pid); err != nil && lastErr == nil {
+				lastErr = err
+			}
 		}
 		if name != "" {
+			removeStopFile(installDir, name)
 			removePIDFile(installDir, name)
 			m.mu.Lock()
 			delete(m.processes, name)

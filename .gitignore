@@ -36,6 +36,7 @@ NODE_OPERATOR_MANUAL.ko.md
 NODE_OPERATOR_MANUAL.md
 노드에포함되어야할.md
 reshare개념잡기.md
+orchestrator-reshare-failure-scenarios.md
 
 # Built binaries at repo root (not release artifacts)
 /aicw-node-linux

@@ -61,26 +61,6 @@ export namespace main {
 	        this.nodeRunning = source["nodeRunning"];
 	    }
 	}
-	export class ReleaseUpdateView {
-	    currentVersion: string;
-	    latestVersion?: string;
-	    tagName?: string;
-	    releasesUrl?: string;
-	    updateAvailable: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new ReleaseUpdateView(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.currentVersion = source["currentVersion"];
-	        this.latestVersion = source["latestVersion"];
-	        this.tagName = source["tagName"];
-	        this.releasesUrl = source["releasesUrl"];
-	        this.updateAvailable = source["updateAvailable"];
-	    }
-	}
 	export class BrowserSignInResult {
 	    ok: boolean;
 	    wallet?: string;
@@ -298,6 +278,26 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class ReleaseUpdateView {
+	    currentVersion: string;
+	    latestVersion?: string;
+	    tagName?: string;
+	    releasesUrl?: string;
+	    updateAvailable: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ReleaseUpdateView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.currentVersion = source["currentVersion"];
+	        this.latestVersion = source["latestVersion"];
+	        this.tagName = source["tagName"];
+	        this.releasesUrl = source["releasesUrl"];
+	        this.updateAvailable = source["updateAvailable"];
+	    }
 	}
 	export class UnstakeNodeResult {
 	    ok: boolean;

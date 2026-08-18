@@ -6,16 +6,16 @@ export function AcceptLicense() {
   return window['go']['main']['App']['AcceptLicense']();
 }
 
+export function CheckReleaseUpdate() {
+  return window['go']['main']['App']['CheckReleaseUpdate']();
+}
+
 export function EnsureSharedSetup() {
   return window['go']['main']['App']['EnsureSharedSetup']();
 }
 
 export function GetActionMessage() {
   return window['go']['main']['App']['GetActionMessage']();
-}
-
-export function CheckReleaseUpdate() {
-  return window['go']['main']['App']['CheckReleaseUpdate']();
 }
 
 export function GetBootstrap() {

@@ -13,13 +13,13 @@ func TestDecideTrigger(t *testing.T) {
 		want        Trigger
 	}{
 		{"healthy with spare", 2, 1, 5, 5, TriggerNone},
-		{"healthy exactly spare", 2, 1, 4, 4, TriggerNone},         // aPing 4 >= minSign+spare 4
-		{"spare exhausted -> proactive", 2, 1, 3, 4, TriggerProactive}, // aReady 4>=3, aPing 3<4
-		{"signable but no spare (spare0)", 2, 0, 3, 3, TriggerNone},    // minSign+spare=3, aPing 3 not <3
-		{"below floor -> urgent", 2, 1, 2, 2, TriggerUrgent},          // aReady 2<3, >0
+		{"healthy exactly spare", 2, 1, 4, 4, TriggerNone}, // aReady 4 >= minSign+spare 4
+		{"ready spare exhausted -> proactive", 2, 1, 4, 3, TriggerProactive}, // stop+resign: ping lags, ready=3
+		{"signable but no spare (spare0)", 2, 0, 3, 3, TriggerNone},          // minSign+spare=3, aReady 3 not <3
+		{"below floor -> urgent", 2, 1, 2, 2, TriggerUrgent},                 // aReady 2<3, >0
 		{"one ready -> urgent", 2, 1, 1, 1, TriggerUrgent},
 		{"all gone -> unrecoverable", 2, 1, 0, 0, TriggerUnrecoverable},
-		{"ping gone but ready ok -> proactive", 2, 1, 0, 5, TriggerProactive},
+		{"ping gone but ready ok -> none", 2, 1, 0, 5, TriggerNone},
 	}
 	for _, c := range cases {
 		got := DecideTrigger(c.threshold, c.spareTarget, c.aPing, c.aReady)
