@@ -240,6 +240,64 @@ func (m *Manager) allLogsLocked() []string {
 	return out
 }
 
+// badgerDBDir mirrors aicw-node db_path resolution (cmd/aicw-node newBadgerKV):
+// basePath from operator-config db_path (default ".") joined with installDir, then nodeName.
+func badgerDBDir(installDir, nodeName string) string {
+	basePath := "."
+	operatorConfig := filepath.Join(installDir, "operator-config.yaml")
+	if data, err := os.ReadFile(operatorConfig); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "db_path:") {
+				v := strings.TrimSpace(strings.TrimPrefix(line, "db_path:"))
+				v = strings.Trim(v, `"'`)
+				if v != "" {
+					basePath = v
+				}
+				break
+			}
+		}
+	}
+	if !filepath.IsAbs(basePath) {
+		basePath = filepath.Join(installDir, basePath)
+	}
+	return filepath.Join(basePath, nodeName)
+}
+
+func (m *Manager) cleanupStaleState(installDir, nodeName string) {
+	installDir = strings.TrimSpace(installDir)
+	nodeName = strings.TrimSpace(nodeName)
+	if installDir == "" || nodeName == "" {
+		return
+	}
+
+	pidPath := pidFilePath(installDir, nodeName)
+	raw, err := os.ReadFile(pidPath)
+	if err != nil {
+		return
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		_ = os.Remove(pidPath)
+		m.appendLog(nodeName, "[gui] cleaned stale pid/LOCK")
+		return
+	}
+
+	if processAlive(pid) {
+		return
+	}
+
+	_ = os.Remove(pidPath)
+
+	lockPath := filepath.Join(badgerDBDir(installDir, nodeName), "LOCK")
+	if _, err := os.Stat(lockPath); err == nil {
+		_ = os.Remove(lockPath)
+	}
+
+	m.appendLog(nodeName, "[gui] cleaned stale pid/LOCK")
+}
+
 func (m *Manager) appendLog(nodeName, line string) {
 	if strings.TrimSpace(nodeName) == "" {
 		nodeName = "gui"
@@ -258,6 +316,8 @@ func (m *Manager) Start(installDir, nodeName string) error {
 	if nodeName == "" {
 		return fmt.Errorf("node name is required")
 	}
+
+	m.cleanupStaleState(installDir, nodeName)
 
 	m.mu.Lock()
 	if m.runningNamesLocked(installDir)[nodeName] {
