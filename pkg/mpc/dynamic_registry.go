@@ -418,6 +418,15 @@ func nextReadyReregisterBackoff(current time.Duration) time.Duration {
 // maintainReadySession keeps the ready/ key alive and re-registers after session loss.
 func (r *DynamicRegistry) maintainReadySession() {
 	for {
+		// Resign() may land between a successful re-register and this iteration;
+		// bail out before renewing so the leaked session dies by TTL instead of
+		// being kept alive for a node that already resigned.
+		select {
+		case <-r.watchStopCh:
+			return
+		default:
+		}
+
 		r.mu.RLock()
 		sessionID := r.readySessionID
 		stopCh := r.readySessionStopCh
