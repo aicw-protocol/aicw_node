@@ -21,6 +21,8 @@ orchestrator:
   global_max_inflight: 3
   reshare_result_timeout_minutes: 10
   inflight_lock_ttl_minutes: 15
+  inflight_sweep_enabled: true
+  inflight_sweep_interval_seconds: 300
   confirm_dead_scans: 2
   migrate_oversized: true
   event_initiator_key_path: "/opt/aicw/secrets/reshare_initiator.key"
