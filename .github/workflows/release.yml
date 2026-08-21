@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,6 +25,7 @@ jobs:
             goos: darwin
             goarch: universal
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,9 +50,12 @@ jobs:
       - name: Install Linux GUI dependencies
         if: matrix.goos == 'linux'
         working-directory: aicw_node
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev zip
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libwebkit2gtk-4.1-dev zip
 
       - name: Install NSIS
         if: matrix.goos == 'windows'
