@@ -393,8 +393,9 @@ func (m *Manager) Start(installDir, nodeName string) error {
 func (m *Manager) consume(nodeName string, reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
-		line := strings.TrimSpace(stripANSI(scanner.Text()))
-		if line == "" {
+		line := stripANSI(scanner.Text())
+		line = strings.TrimRight(line, "\r\n\t ")
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		m.appendLog(nodeName, line)
