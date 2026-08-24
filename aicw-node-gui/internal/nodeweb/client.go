@@ -259,6 +259,87 @@ func (c *Client) GetActiveNodeIDs() (map[string]bool, error) {
 	return active, nil
 }
 
+type NetworkRewardsSummary struct {
+	RegisteredNodes   int     `json:"registeredNodes"`
+	NodesWithActivity int     `json:"nodesWithActivity"`
+	TotalWalletOpens  int     `json:"totalWalletOpens"`
+	TotalRewardSol    float64 `json:"totalRewardSol"`
+}
+
+type NetworkRewardsResponse struct {
+	Summary NetworkRewardsSummary `json:"summary"`
+}
+
+func (c *Client) GetNetworkRewards() (*NetworkRewardsResponse, error) {
+	resp, err := c.HTTPClient.Get(c.BaseURL + "/api/node-rewards")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("network rewards %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var out NetworkRewardsResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+type DashboardNode struct {
+	NodeID              string  `json:"nodeId"`
+	NodeName            *string `json:"nodeName"`
+	RewardSol           float64 `json:"rewardSol"`
+	RewardToken         float64 `json:"rewardToken"`
+	ReferralWalletOpens int     `json:"referralWalletOpens"`
+}
+
+type DashboardStake struct {
+	AmountSol float64 `json:"amountSol"`
+	Status    string  `json:"status"`
+}
+
+type DashboardTotals struct {
+	ReferralWalletOpens int     `json:"referralWalletOpens"`
+	RewardSol           float64 `json:"rewardSol"`
+	RewardToken         float64 `json:"rewardToken"`
+}
+
+type WalletDashboardResponse struct {
+	Nodes       []DashboardNode `json:"nodes"`
+	ActiveStake *DashboardStake `json:"activeStake"`
+	Totals      DashboardTotals `json:"totals"`
+}
+
+func (c *Client) GetWalletDashboard(wallet string) (*WalletDashboardResponse, error) {
+	endpoint := fmt.Sprintf("%s/api/dashboard?wallet=%s", c.BaseURL, url.QueryEscape(wallet))
+	resp, err := c.HTTPClient.Get(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("wallet dashboard %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var out WalletDashboardResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *Client) WaitForNodeInactive(nodeID string, timeout time.Duration) error {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {

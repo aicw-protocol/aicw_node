@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aicw/aicw_node/aicw-node-gui/internal/activity"
 	"github.com/aicw/aicw_node/aicw-node-gui/internal/authserver"
 	"github.com/aicw/aicw_node/aicw-node-gui/internal/config"
 	"github.com/aicw/aicw_node/aicw-node-gui/internal/install"
@@ -21,7 +22,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-var guiVersion = "0.1.29"
+var guiVersion = "0.1.32"
 
 type Session struct {
 	Wallet    string `json:"wallet"`
@@ -50,6 +51,8 @@ type App struct {
 	registerPhase    string
 	registerJobName  string
 	registerResult   *RegisterNodeResult
+
+	activityTracker *activity.Tracker
 }
 
 func NewApp() *App {
@@ -59,6 +62,7 @@ func NewApp() *App {
 		webClient:    nodeweb.NewClient(config.WebBaseURL()),
 		nodeProc:     nodeprocess.NewManager(),
 		installScope: "current_user",
+		activityTracker: activity.NewTracker(),
 	}
 }
 
@@ -658,6 +662,30 @@ type OffboardStatusView struct {
 	RegisteredNodeCount int     `json:"registeredNodeCount"`
 }
 
+type NetworkOverviewView struct {
+	RegisteredNodes  int     `json:"registeredNodes"`
+	ActiveNodes      int     `json:"activeNodes"`
+	TotalWalletOpens int     `json:"totalWalletOpens"`
+	TotalRewardSol   float64 `json:"totalRewardSol"`
+}
+
+type WalletStatsView struct {
+	StakedSol             float64 `json:"stakedSol"`
+	YourNodes             int     `json:"yourNodes"`
+	ReferralWalletOpens   int     `json:"referralWalletOpens"`
+	RewardSol             float64 `json:"rewardSol"`
+	RewardToken           float64 `json:"rewardToken"`
+	RequiredStakeSol      float64 `json:"requiredStakeSol"`
+}
+
+type ActivityEventView struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	NodeName  string `json:"nodeName,omitempty"`
+	Message   string `json:"message"`
+	Timestamp string `json:"timestamp"`
+}
+
 type DashboardView struct {
 	OK                 bool          `json:"ok"`
 	Error              string        `json:"error,omitempty"`
@@ -675,6 +703,9 @@ type DashboardView struct {
 	CanRegister        bool          `json:"canRegister"`
 	SharedMissing      []string      `json:"sharedMissing"`
 	Offboard           *OffboardStatusView `json:"offboard,omitempty"`
+	Network            *NetworkOverviewView `json:"network,omitempty"`
+	WalletStats        *WalletStatsView     `json:"walletStats,omitempty"`
+	Activity           []ActivityEventView  `json:"activity,omitempty"`
 	Nodes              []NodeRowView `json:"nodes"`
 }
 
@@ -733,6 +764,7 @@ func (a *App) GetDashboard() DashboardView {
 		} else {
 			view.OK = true
 		}
+		a.enrichDashboardOverview(&view, wallet, nil)
 		return view
 	}
 
@@ -745,6 +777,7 @@ func (a *App) GetDashboard() DashboardView {
 		if len(view.Nodes) > 0 {
 			view.OK = true
 		}
+		a.enrichDashboardOverview(&view, wallet, nil)
 		return view
 	}
 
@@ -798,7 +831,73 @@ func (a *App) GetDashboard() DashboardView {
 	}
 
 	view.OK = true
+	a.enrichDashboardOverview(&view, wallet, status)
 	return view
+}
+
+func mapActivityEvents(events []activity.Event) []ActivityEventView {
+	out := make([]ActivityEventView, 0, len(events))
+	for _, event := range events {
+		out = append(out, ActivityEventView{
+			ID:        event.ID,
+			Type:      event.Type,
+			NodeName:  event.NodeName,
+			Message:   event.Message,
+			Timestamp: event.Timestamp,
+		})
+	}
+	return out
+}
+
+func (a *App) enrichDashboardOverview(view *DashboardView, wallet string, status *nodeweb.WalletStatus) {
+	a.activityTracker.IngestLogs(a.nodeProc.Logs())
+
+	network := &NetworkOverviewView{}
+	if rewards, err := a.webClient.GetNetworkRewards(); err == nil && rewards != nil {
+		network.RegisteredNodes = rewards.Summary.RegisteredNodes
+		network.TotalWalletOpens = rewards.Summary.TotalWalletOpens
+		network.TotalRewardSol = rewards.Summary.TotalRewardSol
+	}
+	if activeIDs, err := a.webClient.GetActiveNodeIDs(); err == nil {
+		network.ActiveNodes = len(activeIDs)
+	}
+	view.Network = network
+
+	if wallet != "" {
+		stats := &WalletStatsView{
+			YourNodes: len(view.Nodes),
+		}
+		if status != nil {
+			stats.RequiredStakeSol = status.Eligibility.RequiredStakeSol
+		}
+		if dash, err := a.webClient.GetWalletDashboard(wallet); err == nil && dash != nil {
+			stats.ReferralWalletOpens = dash.Totals.ReferralWalletOpens
+			stats.RewardSol = dash.Totals.RewardSol
+			stats.RewardToken = dash.Totals.RewardToken
+			if dash.ActiveStake != nil {
+				stats.StakedSol = dash.ActiveStake.AmountSol
+			}
+
+			rewardNodes := make([]activity.NodeReward, 0, len(dash.Nodes))
+			for _, node := range dash.Nodes {
+				name := nodeweb.NodeRecordName(nodeweb.NodeRecord{
+					NodeID:   node.NodeID,
+					NodeName: node.NodeName,
+				})
+				rewardNodes = append(rewardNodes, activity.NodeReward{
+					NodeID:              node.NodeID,
+					NodeName:            name,
+					ReferralWalletOpens: node.ReferralWalletOpens,
+					RewardSol:           node.RewardSol,
+					RewardToken:         node.RewardToken,
+				})
+			}
+			a.activityTracker.IngestRewards(rewardNodes)
+		}
+		view.WalletStats = stats
+	}
+
+	view.Activity = mapActivityEvents(a.activityTracker.Events())
 }
 
 func canRemoveNode(webStatus, nodeID string, pendingUnstake bool) bool {

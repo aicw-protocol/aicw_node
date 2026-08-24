@@ -5,7 +5,7 @@ Unicode true
 !define INFO_PROJECTNAME "aicw-node-gui"
 !define INFO_COMPANYNAME "AICW"
 !define INFO_PRODUCTNAME "AICW Node"
-!define INFO_PRODUCTVERSION "0.1.26"
+!define INFO_PRODUCTVERSION "0.1.32"
 !define INFO_COPYRIGHT "Copyright AICW"
 !define PRODUCT_EXECUTABLE "aicw-node-setup.exe"
 !define UNINST_KEY_NAME "AICW Node"
@@ -29,6 +29,8 @@ ManifestDPIAware true
 !define MUI_ICON "..\icon.ico"
 !define MUI_UNICON "..\icon.ico"
 !define MUI_FINISHPAGE_NOAUTOCLOSE
+!define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXECUTABLE}"
+!define MUI_FINISHPAGE_RUN_TEXT "Launch AICW Node now"
 !define MUI_ABORTWARNING
 
 !insertmacro MUI_PAGE_WELCOME

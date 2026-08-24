@@ -1,6 +1,6 @@
 const state = {
   step: "license",
-  tab: "nodes",
+  tab: "overview",
   installDir: "",
   dashboard: null,
   logs: [],
@@ -72,6 +72,7 @@ function setTabBar(visible) {
   }
   tabBar.classList.remove("hidden");
   tabBar.innerHTML = `
+    <button class="tab-btn ${state.tab === "overview" ? "active" : ""}" data-tab="overview">Overview</button>
     <button class="tab-btn ${state.tab === "nodes" ? "active" : ""}" data-tab="nodes">Nodes</button>
     <button class="tab-btn ${state.tab === "logs" ? "active" : ""}" data-tab="logs">Logs</button>
   `;
@@ -266,7 +267,27 @@ function renderPath() {
       render();
       return;
     }
+    state.step = "complete";
+    render();
+  };
+}
+
+function renderComplete() {
+  setHeader("");
+  setTabBar(false);
+  document.getElementById("screenRoot").innerHTML = `
+    <section class="panel">
+      <div class="complete-icon">✓</div>
+      <h1>Installation complete</h1>
+      <p>AICW Node is ready. Sign in with your wallet, register a node, and start operating on the network.</p>
+      <p class="muted">Tip: keep this app running while your nodes are active so they stay connected.</p>
+    </section>`;
+  setFooter(`
+    <button id="btnOpenDashboard" class="primary">Open AICW Node</button>
+  `);
+  document.getElementById("btnOpenDashboard").onclick = () => {
     state.step = "dashboard";
+    state.tab = "overview";
     render();
   };
 }
@@ -455,6 +476,98 @@ function renderStopConfirmModal() {
         </div>
       </div>
     </div>`;
+}
+
+function formatSol(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0";
+  if (n >= 1) return n.toFixed(4);
+  return n.toFixed(6);
+}
+
+function formatWhen(iso) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function renderStatCard(label, value) {
+  return `
+    <div class="stat-card">
+      <div class="stat-label">${escapeHtml(label)}</div>
+      <div class="stat-value">${escapeHtml(String(value))}</div>
+    </div>`;
+}
+
+function renderOverviewTab(dashboard) {
+  const network = dashboard.network || {};
+  const stats = dashboard.walletStats;
+  const activity = dashboard.activity || [];
+
+  const networkGrid = `
+    <div class="section-title">Network</div>
+    <div class="stats-grid">
+      ${renderStatCard("Registered nodes", network.registeredNodes ?? "—")}
+      ${renderStatCard("Active nodes", network.activeNodes ?? "—")}
+      ${renderStatCard("Wallet issuances", network.totalWalletOpens ?? "—")}
+      ${renderStatCard("Network SOL rewards", network.totalRewardSol != null ? `${formatSol(network.totalRewardSol)} SOL` : "—")}
+    </div>`;
+
+  let walletSection = "";
+  if (dashboard.wallet && stats) {
+    walletSection = `
+      <div class="section-title">Your account</div>
+      <div class="stats-grid">
+        ${renderStatCard("Staked SOL", `${formatSol(stats.stakedSol)} SOL`)}
+        ${renderStatCard("Your nodes", stats.yourNodes ?? 0)}
+        ${renderStatCard("Wallet issuances", stats.referralWalletOpens ?? 0)}
+        ${renderStatCard("SOL rewards", `${formatSol(stats.rewardSol)} SOL`)}
+        ${renderStatCard("Token rewards", formatSol(stats.rewardToken))}
+      </div>`;
+  } else {
+    walletSection = `
+      <div class="signin-box">
+        <p>Sign in to see your staking, nodes, and reward totals.</p>
+        <div class="toolbar">
+          <button id="btnBrowserSignIn" class="primary">Sign in with Browser</button>
+        </div>
+      </div>`;
+  }
+
+  const activitySection =
+    activity.length > 0
+      ? `<div class="section-title">Recent activity</div>
+         <div class="activity-list">
+           ${activity
+             .slice(0, 12)
+             .map(
+               (item) => `
+             <div class="activity-item">
+               <div class="activity-time">${escapeHtml(formatWhen(item.timestamp))}</div>
+               <div class="activity-msg">${escapeHtml(item.message)}</div>
+             </div>`,
+             )
+             .join("")}
+         </div>`
+      : `<div class="section-title">Recent activity</div>
+         <p class="muted">When your node is selected for wallet issuance or signing, and when rewards are recorded, events appear here.</p>`;
+
+  return `
+    <section class="panel panel-wide">
+      <div class="panel-header">
+        <div>
+          <h1>Overview</h1>
+          <p class="section-desc muted">Network status and your operator rewards at a glance.</p>
+        </div>
+      </div>
+      ${renderStatusStrip(dashboard)}
+      ${networkGrid}
+      ${walletSection}
+      ${activitySection}
+    </section>`;
 }
 
 function renderNodesTab(dashboard) {
@@ -867,6 +980,9 @@ function renderSignature(dashboard) {
   if (state.tab === "logs") {
     parts.push(state.logs?.length ?? 0, state.logs?.[state.logs.length - 1] ?? "");
   }
+  if (state.tab === "overview") {
+    parts.push(dashboard.activity?.length ?? 0, dashboard.activity?.[0]?.id ?? "");
+  }
   return JSON.stringify(parts);
 }
 
@@ -895,7 +1011,11 @@ function renderDashboardShell(options = {}) {
   setTabBar(true);
   renderDashboardHeader(dashboard);
   document.getElementById("screenRoot").innerHTML =
-    state.tab === "logs" ? renderLogsTab(state.logs, dashboard) : renderNodesTab(dashboard);
+    state.tab === "logs"
+      ? renderLogsTab(state.logs, dashboard)
+      : state.tab === "overview"
+        ? renderOverviewTab(dashboard)
+        : renderNodesTab(dashboard);
   bindDashboardEvents();
   setFooter(`<span class="muted">${escapeHtml(dashboard.installDir || "")}</span>`);
 }
@@ -926,6 +1046,7 @@ function render() {
   if (state.step === "license") return renderLicense();
   if (state.step === "path") return renderPath();
   if (state.step === "installing") return renderInstalling();
+  if (state.step === "complete") return renderComplete();
   if (state.step === "dashboard") return renderDashboard();
 }
 

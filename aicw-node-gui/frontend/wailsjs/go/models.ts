@@ -35,6 +35,26 @@ export namespace install {
 
 export namespace main {
 	
+	export class ActivityEventView {
+	    id: string;
+	    type: string;
+	    nodeName?: string;
+	    message: string;
+	    timestamp: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ActivityEventView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.type = source["type"];
+	        this.nodeName = source["nodeName"];
+	        this.message = source["message"];
+	        this.timestamp = source["timestamp"];
+	    }
+	}
 	export class BootstrapView {
 	    installed: boolean;
 	    installDir: string;
@@ -105,6 +125,46 @@ export namespace main {
 	        this.canRemove = source["canRemove"];
 	    }
 	}
+	export class WalletStatsView {
+	    stakedSol: number;
+	    yourNodes: number;
+	    referralWalletOpens: number;
+	    rewardSol: number;
+	    rewardToken: number;
+	    requiredStakeSol: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new WalletStatsView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.stakedSol = source["stakedSol"];
+	        this.yourNodes = source["yourNodes"];
+	        this.referralWalletOpens = source["referralWalletOpens"];
+	        this.rewardSol = source["rewardSol"];
+	        this.rewardToken = source["rewardToken"];
+	        this.requiredStakeSol = source["requiredStakeSol"];
+	    }
+	}
+	export class NetworkOverviewView {
+	    registeredNodes: number;
+	    activeNodes: number;
+	    totalWalletOpens: number;
+	    totalRewardSol: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new NetworkOverviewView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.registeredNodes = source["registeredNodes"];
+	        this.activeNodes = source["activeNodes"];
+	        this.totalWalletOpens = source["totalWalletOpens"];
+	        this.totalRewardSol = source["totalRewardSol"];
+	    }
+	}
 	export class OffboardStatusView {
 	    pendingUnstake: boolean;
 	    returnAvailableAt?: string;
@@ -140,6 +200,9 @@ export namespace main {
 	    canRegister: boolean;
 	    sharedMissing: string[];
 	    offboard?: OffboardStatusView;
+	    network?: NetworkOverviewView;
+	    walletStats?: WalletStatsView;
+	    activity?: ActivityEventView[];
 	    nodes: NodeRowView[];
 	
 	    static createFrom(source: any = {}) {
@@ -164,6 +227,9 @@ export namespace main {
 	        this.canRegister = source["canRegister"];
 	        this.sharedMissing = source["sharedMissing"];
 	        this.offboard = this.convertValues(source["offboard"], OffboardStatusView);
+	        this.network = this.convertValues(source["network"], NetworkOverviewView);
+	        this.walletStats = this.convertValues(source["walletStats"], WalletStatsView);
+	        this.activity = this.convertValues(source["activity"], ActivityEventView);
 	        this.nodes = this.convertValues(source["nodes"], NodeRowView);
 	    }
 	
@@ -201,6 +267,7 @@ export namespace main {
 	        this.error = source["error"];
 	    }
 	}
+	
 	export class NodeActionResult {
 	    ok: boolean;
 	    cancelled?: boolean;
@@ -319,6 +386,7 @@ export namespace main {
 	        this.returnAvailableAt = source["returnAvailableAt"];
 	    }
 	}
+	
 	export class WalletStatusView {
 	    ok: boolean;
 	    error?: string;
