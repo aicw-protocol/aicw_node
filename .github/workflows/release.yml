@@ -110,7 +110,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/aicw-node-setup-windows-amd64-installer.exe
-            dist/aicw-node-setup-linux-amd64.zip
-            dist/aicw-node-setup-darwin-universal.app.zip
+            dist/aicw-node-setup-v*-windows-amd64-installer.exe
+            dist/aicw-node-setup-v*-linux-amd64.zip
+            dist/aicw-node-setup-v*-darwin-universal.app.zip
           generate_release_notes: true

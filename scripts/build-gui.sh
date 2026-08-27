@@ -8,15 +8,18 @@
 #   GOOS=darwin GOARCH=universal ./scripts/build-gui.sh   # macOS only
 #
 # Output (dist/):
-#   Windows: aicw-node-setup-windows-amd64-installer.exe (NSIS, Programs and Features)
-#   Linux:   aicw-node-setup-linux-amd64.zip
-#   macOS:   aicw-node-setup-darwin-universal.app.zip
+#   Windows: aicw-node-setup-vX.Y.Z-windows-amd64-installer.exe (NSIS)
+#   Linux:   aicw-node-setup-vX.Y.Z-linux-amd64.zip
+#   macOS:   aicw-node-setup-vX.Y.Z-darwin-universal.app.zip
+#
+# Installed app binary stays aicw-node-setup.exe (stable path after install).
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GUI_DIR="$ROOT/aicw-node-gui"
 DIST_DIR="$ROOT/dist"
+WAILS_JSON="$GUI_DIR/wails.json"
 mkdir -p "$DIST_DIR"
 
 GOOS="${GOOS:-$(go env GOOS)}"
@@ -24,38 +27,54 @@ GOARCH="${GOARCH:-$(go env GOARCH)}"
 TARGET_GOARCH="$GOARCH"
 
 node_local_name="aicw-node"
-setup_suffix="${GOOS}-${GOARCH}"
 platform="${GOOS}/${GOARCH}"
-windows_installer_name="aicw-node-setup-windows-amd64-installer.exe"
 
 if [ "$GOOS" = "windows" ]; then
   node_local_name="aicw-node.exe"
-  setup_suffix="${GOOS}-${GOARCH}.exe"
 fi
 
 if [ "$GOOS" = "darwin" ] && [ "$GOARCH" = "universal" ]; then
   platform="darwin/universal"
-  setup_suffix="darwin-universal.app.zip"
-fi
-
-setup_dist_name="aicw-node-setup-${setup_suffix}"
-if [ "$GOOS" = "darwin" ] && [ "$GOARCH" = "universal" ]; then
-  setup_dist_name="aicw-node-setup-darwin-universal.app.zip"
 fi
 
 NODE_LOCAL="$GUI_DIR/$node_local_name"
-SETUP_DIST="$DIST_DIR/$setup_dist_name"
 
 if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
   PRODUCT_VERSION="${GITHUB_REF_NAME#v}"
   if command -v node >/dev/null 2>&1; then
-    node - "$GUI_DIR/wails.json" "$PRODUCT_VERSION" <<'EOF'
+    node - "$WAILS_JSON" "$PRODUCT_VERSION" <<'EOF'
 const fs = require("fs");
 const [file, version] = process.argv.slice(2);
 const json = JSON.parse(fs.readFileSync(file, "utf8"));
 json.info.productVersion = version;
 fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
 EOF
+  fi
+elif command -v node >/dev/null 2>&1; then
+  PRODUCT_VERSION="$(node - "$WAILS_JSON" <<'EOF'
+const fs = require("fs");
+const json = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+process.stdout.write(json.info.productVersion || "0.0.0");
+EOF
+)"
+else
+  PRODUCT_VERSION="0.0.0"
+fi
+
+VERSION_TAG="v${PRODUCT_VERSION}"
+windows_installer_name="aicw-node-setup-${VERSION_TAG}-windows-amd64-installer.exe"
+linux_zip_name="aicw-node-setup-${VERSION_TAG}-linux-amd64.zip"
+darwin_zip_name="aicw-node-setup-${VERSION_TAG}-darwin-universal.app.zip"
+linux_binary_name="aicw-node-setup-linux-amd64"
+
+if [ "$GOOS" = "darwin" ] && [ "$GOARCH" = "universal" ]; then
+  SETUP_DIST="$DIST_DIR/$darwin_zip_name"
+elif [ "$GOOS" = "linux" ] && [ "$TARGET_GOARCH" = "amd64" ]; then
+  SETUP_DIST="$DIST_DIR/$linux_binary_name"
+else
+  SETUP_DIST="$DIST_DIR/aicw-node-setup-${GOOS}-${TARGET_GOARCH}"
+  if [ "$GOOS" = "windows" ]; then
+    SETUP_DIST="${SETUP_DIST}.exe"
   fi
 fi
 
@@ -64,6 +83,7 @@ if [ -n "${PRODUCT_VERSION:-}" ]; then
   GUI_LDFLAGS="-X main.guiVersion=${PRODUCT_VERSION} ${GUI_LDFLAGS}"
 fi
 
+echo "==> Product version ${VERSION_TAG}"
 echo "==> Building aicw-node (${platform})"
 pushd "$ROOT" >/dev/null
 if [ "$GOOS" = "darwin" ] && [ "$GOARCH" = "universal" ]; then
@@ -157,8 +177,8 @@ if [ "$GOOS" = "linux" ] && [ "$TARGET_GOARCH" = "amd64" ]; then
   bundled_engine="$DIST_DIR/$node_local_name"
   cp "$NODE_LOCAL" "$bundled_engine"
   chmod +x "$bundled_engine" 2>/dev/null || true
-  (cd "$DIST_DIR" && zip -j -q "aicw-node-setup-linux-amd64.zip" \
-    "aicw-node-setup-linux-amd64" "$node_local_name")
+  rm -f "$DIST_DIR/$linux_zip_name"
+  (cd "$DIST_DIR" && zip -j -q "$linux_zip_name" "$linux_binary_name" "$node_local_name")
 fi
 
 if [ "$GOOS" = "$(go env GOOS)" ] && [ "$TARGET_GOARCH" = "$(go env GOARCH)" ]; then
@@ -176,7 +196,9 @@ echo "Done:"
 if [ -f "$DIST_DIR/$windows_installer_name" ]; then
   echo "  $DIST_DIR/$windows_installer_name"
 fi
-echo "  $SETUP_DIST"
-if [ -f "$DIST_DIR/aicw-node-setup-linux-amd64.zip" ]; then
-  echo "  $DIST_DIR/aicw-node-setup-linux-amd64.zip"
+if [ -f "$SETUP_DIST" ] && [ "$GOOS" != "linux" ]; then
+  echo "  $SETUP_DIST"
+fi
+if [ -f "$DIST_DIR/$linux_zip_name" ]; then
+  echo "  $DIST_DIR/$linux_zip_name"
 fi

@@ -22,13 +22,13 @@ Each release ships **one file per platform**:
 
 | Platform | Download | What's inside |
 |----------|----------|---------------|
-| Windows | `aicw-node-setup-windows-amd64-installer.exe` | NSIS installer (Programs and Features uninstall) + GUI + `aicw-node.exe` |
-| Linux | `aicw-node-setup-linux-amd64.zip` | GUI app + `aicw-node` engine |
-| macOS | `aicw-node-setup-darwin-universal.app.zip` | `AICW Node.app` (engine bundled inside) |
+| Windows | `aicw-node-setup-vX.Y.Z-windows-amd64-installer.exe` | NSIS installer (Programs and Features uninstall) + GUI + `aicw-node.exe` |
+| Linux | `aicw-node-setup-vX.Y.Z-linux-amd64.zip` | GUI app + `aicw-node` engine |
+| macOS | `aicw-node-setup-vX.Y.Z-darwin-universal.app.zip` | `AICW Node.app` (engine bundled inside) |
 
 Windows installs to `%LOCALAPPDATA%\Programs\AICW Node\` and registers under **Settings → Apps → Installed apps → AICW Node**.
 
-Local dev builds also write `dist/aicw-node-setup-windows-amd64-installer.exe`.
+Local dev builds also write `dist/aicw-node-setup-vX.Y.Z-windows-amd64-installer.exe` (version from `wails.json`).
 
 ## Install folders
 
