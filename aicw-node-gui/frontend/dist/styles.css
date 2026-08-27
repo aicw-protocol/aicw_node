@@ -99,8 +99,8 @@ body {
 
 .tab-bar {
   display: flex;
-  gap: 2px;
-  padding: 0 16px;
+  gap: 4px;
+  padding: 8px 16px 10px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
@@ -108,19 +108,25 @@ body {
 .tab-btn {
   border: none;
   background: transparent;
-  padding: 8px 12px;
+  padding: 6px 14px;
   font: inherit;
   font-size: 0.85rem;
   color: var(--muted);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  border-radius: var(--radius);
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.tab-btn:hover {
+  color: var(--text);
+  background: #f3f4f6;
 }
 
 .tab-btn.active {
   color: var(--text);
-  border-bottom-color: var(--accent);
+  background: #eef0f3;
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .screen-root {
@@ -177,10 +183,6 @@ body {
   background: #f9fafb;
   font-size: 0.82rem;
   color: var(--muted);
-}
-
-.status-strip.status-running {
-  color: var(--text);
 }
 
 .status-strip.status-update {

@@ -378,21 +378,12 @@ function syncUpdateBannerRoot() {
 
 function renderStatusStrip(dashboard) {
   if (!dashboard.wallet) return "";
-  const max = dashboard.maxConcurrentNodes || 0;
-  const count = dashboard.runningCount || 0;
   let strip = "";
   if (dashboard.offboard?.pendingUnstake) {
     const when = dashboard.offboard.returnAvailableAt
       ? new Date(dashboard.offboard.returnAvailableAt).toLocaleString()
       : "after the 72-hour waiting period";
     strip += `<div class="status-strip status-unstake">Stake return in progress — staked SOL returns around <strong>${escapeHtml(when)}</strong>.</div>`;
-  }
-  if (count > 0) {
-    const names = (dashboard.runningNodeNames || []).map(escapeHtml).join(", ");
-    const countLabel = max > 0 ? `${count}/${max}` : String(count);
-    strip += `<div class="status-strip status-running">Running <strong>${countLabel}</strong>${names ? `: ${names}` : ""} — logs are in the Logs tab.</div>`;
-  } else if (!strip) {
-    strip = `<div class="status-strip">No node process is running.</div>`;
   }
   return strip;
 }
