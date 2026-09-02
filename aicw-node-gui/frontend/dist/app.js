@@ -1030,7 +1030,7 @@ function renderDashboard() {
     if (state.stopConfirmNode || state.stopBusy) return;
     if (state.removeConfirmNode || state.removeBusy) return;
     refreshDashboard({ background: true });
-  }, 4000);
+  }, 30000);
 }
 
 function render() {

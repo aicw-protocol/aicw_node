@@ -176,7 +176,7 @@ func runNode(ctx context.Context, c *cli.Command) error {
 
 	viper.SetDefault("backup_enabled", true)
 	viper.SetDefault("node_web.ping_enabled", false)
-	viper.SetDefault("node_web.ping_interval_seconds", 90)
+	viper.SetDefault("node_web.ping_interval_seconds", 120)
 	if networkConfigPath != "" {
 		if err := aicwconfig.InitViperConfigMerged(networkConfigPath, configPath); err != nil {
 			return fmt.Errorf("failed to load config: %w", err)

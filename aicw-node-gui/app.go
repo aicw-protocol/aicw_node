@@ -754,6 +754,7 @@ func (a *App) GetDashboard() DashboardView {
 	for _, node := range localNodes {
 		localByName[node.NodeName] = node
 	}
+	activeIDs, _ := a.webClient.GetActiveNodeIDs()
 
 	if wallet == "" {
 		for _, local := range localNodes {
@@ -764,7 +765,7 @@ func (a *App) GetDashboard() DashboardView {
 		} else {
 			view.OK = true
 		}
-		a.enrichDashboardOverview(&view, wallet, nil)
+		a.enrichDashboardOverview(&view, wallet, nil, activeIDs)
 		return view
 	}
 
@@ -777,7 +778,7 @@ func (a *App) GetDashboard() DashboardView {
 		if len(view.Nodes) > 0 {
 			view.OK = true
 		}
-		a.enrichDashboardOverview(&view, wallet, nil)
+		a.enrichDashboardOverview(&view, wallet, nil, activeIDs)
 		return view
 	}
 
@@ -801,7 +802,6 @@ func (a *App) GetDashboard() DashboardView {
 		}
 	}
 
-	activeIDs, _ := a.webClient.GetActiveNodeIDs()
 	seen := map[string]bool{}
 
 	for _, record := range status.Nodes {
@@ -831,7 +831,7 @@ func (a *App) GetDashboard() DashboardView {
 	}
 
 	view.OK = true
-	a.enrichDashboardOverview(&view, wallet, status)
+	a.enrichDashboardOverview(&view, wallet, status, activeIDs)
 	return view
 }
 
@@ -849,7 +849,7 @@ func mapActivityEvents(events []activity.Event) []ActivityEventView {
 	return out
 }
 
-func (a *App) enrichDashboardOverview(view *DashboardView, wallet string, status *nodeweb.WalletStatus) {
+func (a *App) enrichDashboardOverview(view *DashboardView, wallet string, status *nodeweb.WalletStatus, activeIDs map[string]bool) {
 	a.activityTracker.IngestLogs(a.nodeProc.Logs())
 
 	network := &NetworkOverviewView{}
@@ -858,9 +858,7 @@ func (a *App) enrichDashboardOverview(view *DashboardView, wallet string, status
 		network.TotalWalletOpens = rewards.Summary.TotalWalletOpens
 		network.TotalRewardSol = rewards.Summary.TotalRewardSol
 	}
-	if activeIDs, err := a.webClient.GetActiveNodeIDs(); err == nil {
-		network.ActiveNodes = len(activeIDs)
-	}
+	network.ActiveNodes = len(activeIDs)
 	view.Network = network
 
 	if wallet != "" {

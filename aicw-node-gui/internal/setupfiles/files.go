@@ -34,7 +34,7 @@ func BuildOperatorConfigYAML(nodeWebURL string, pingIntervalSeconds int) string 
 		urlLine = fmt.Sprintf(`  url: "%s"`, baseURL)
 	}
 	if pingIntervalSeconds < 30 {
-		pingIntervalSeconds = 90
+		pingIntervalSeconds = 120
 	}
 
 	return fmt.Sprintf(`# Operator-local overrides (merge with network-config.yaml from your network admin)

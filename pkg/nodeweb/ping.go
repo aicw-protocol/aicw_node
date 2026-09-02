@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	defaultPingIntervalSeconds = 90
+	defaultPingIntervalSeconds = 120
 	defaultHTTPTimeout         = 10 * time.Second
 	pingPath                   = "/api/nodes/ping"
 )
