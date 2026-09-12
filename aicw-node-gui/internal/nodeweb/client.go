@@ -357,9 +357,16 @@ func (c *Client) GetRewardConfig() (*RewardConfigResponse, error) {
 	return &out, nil
 }
 
-func (c *Client) WithdrawRewardSol(ownerWallet string) (*WithdrawRewardAPIResponse, error) {
-	payload := map[string]string{"ownerWallet": ownerWallet}
-	raw, err := json.Marshal(payload)
+type WithdrawRewardRequest struct {
+	OwnerWallet         string `json:"ownerWallet"`
+	ChallengeToken      string `json:"challengeToken"`
+	SignatureBase64     string `json:"signatureBase64"`
+	Message             string `json:"message"`
+	SignedMessageBase64 string `json:"signedMessageBase64,omitempty"`
+}
+
+func (c *Client) WithdrawRewardSol(req WithdrawRewardRequest) (*WithdrawRewardAPIResponse, error) {
+	raw, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
@@ -389,9 +396,8 @@ func (c *Client) WithdrawRewardSol(ownerWallet string) (*WithdrawRewardAPIRespon
 	return &out, nil
 }
 
-func (c *Client) WithdrawRewardToken(ownerWallet string) (*WithdrawRewardAPIResponse, error) {
-	payload := map[string]string{"ownerWallet": ownerWallet}
-	raw, err := json.Marshal(payload)
+func (c *Client) WithdrawRewardToken(req WithdrawRewardRequest) (*WithdrawRewardAPIResponse, error) {
+	raw, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}

@@ -1224,12 +1224,42 @@ func (a *App) GetRecommendedLinks() map[string]string {
 	}
 }
 
+func (a *App) withdrawRewardAuth(purpose string) (*authserver.Result, error) {
+	ctx, cancel := context.WithCancel(a.ctx)
+	defer cancel()
+
+	server, callbackURL, err := authserver.Start(ctx, a.webClient.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	authURL := nodeweb.AuthActionURL(a.webClient.BaseURL, callbackURL, purpose, "", "")
+	runtime.BrowserOpenURL(a.ctx, authURL)
+
+	return server.WaitResult(3 * time.Minute)
+}
+
 func (a *App) WithdrawRewardSol() WithdrawRewardResult {
 	wallet := a.sessionWallet()
 	if wallet == "" {
 		return WithdrawRewardResult{Error: "Sign in with your wallet first"}
 	}
-	resp, err := a.webClient.WithdrawRewardSol(wallet)
+
+	result, err := a.withdrawRewardAuth("withdraw_sol")
+	if err != nil {
+		return WithdrawRewardResult{Error: err.Error()}
+	}
+	if result.Wallet != wallet {
+		return WithdrawRewardResult{Error: "Signed wallet does not match the desktop session."}
+	}
+
+	resp, err := a.webClient.WithdrawRewardSol(nodeweb.WithdrawRewardRequest{
+		OwnerWallet:         result.Wallet,
+		ChallengeToken:      result.ChallengeToken,
+		SignatureBase64:     result.SignatureBase64,
+		Message:             result.Message,
+		SignedMessageBase64: result.SignedMessageBase64,
+	})
 	if err != nil {
 		return WithdrawRewardResult{Error: err.Error()}
 	}
@@ -1252,7 +1282,22 @@ func (a *App) WithdrawRewardToken() WithdrawRewardResult {
 	if wallet == "" {
 		return WithdrawRewardResult{Error: "Sign in with your wallet first"}
 	}
-	resp, err := a.webClient.WithdrawRewardToken(wallet)
+
+	result, err := a.withdrawRewardAuth("withdraw_token")
+	if err != nil {
+		return WithdrawRewardResult{Error: err.Error()}
+	}
+	if result.Wallet != wallet {
+		return WithdrawRewardResult{Error: "Signed wallet does not match the desktop session."}
+	}
+
+	resp, err := a.webClient.WithdrawRewardToken(nodeweb.WithdrawRewardRequest{
+		OwnerWallet:         result.Wallet,
+		ChallengeToken:      result.ChallengeToken,
+		SignatureBase64:     result.SignatureBase64,
+		Message:             result.Message,
+		SignedMessageBase64: result.SignedMessageBase64,
+	})
 	if err != nil {
 		return WithdrawRewardResult{Error: err.Error()}
 	}
