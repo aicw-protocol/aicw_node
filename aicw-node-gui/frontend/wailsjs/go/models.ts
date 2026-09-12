@@ -131,6 +131,10 @@ export namespace main {
 	    referralWalletOpens: number;
 	    rewardSol: number;
 	    rewardToken: number;
+	    availableSol: number;
+	    availableToken: number;
+	    solWithdrawMin: number;
+	    tokenSymbol: string;
 	    requiredStakeSol: number;
 	
 	    static createFrom(source: any = {}) {
@@ -144,7 +148,31 @@ export namespace main {
 	        this.referralWalletOpens = source["referralWalletOpens"];
 	        this.rewardSol = source["rewardSol"];
 	        this.rewardToken = source["rewardToken"];
+	        this.availableSol = source["availableSol"];
+	        this.availableToken = source["availableToken"];
+	        this.solWithdrawMin = source["solWithdrawMin"];
+	        this.tokenSymbol = source["tokenSymbol"];
 	        this.requiredStakeSol = source["requiredStakeSol"];
+	    }
+	}
+	export class WithdrawRewardResult {
+	    ok: boolean;
+	    amountSol: number;
+	    amountToken: number;
+	    txSignature: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WithdrawRewardResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.amountSol = source["amountSol"];
+	        this.amountToken = source["amountToken"];
+	        this.txSignature = source["txSignature"];
+	        this.error = source["error"];
 	    }
 	}
 	export class NetworkOverviewView {

@@ -20,6 +20,7 @@ const state = {
   releaseUpdateCheckedAt: 0,
   logNodeFilter: "all",
   persistentEventsBound: false,
+  withdrawBusy: false,
 };
 
 const LICENSE_TEXT = `AICW Node Operator Software
@@ -509,14 +510,30 @@ function renderOverviewTab(dashboard) {
 
   let walletSection = "";
   if (dashboard.wallet && stats) {
+    const tokenLabel = stats.tokenSymbol || "TAICW";
+    const solMin = stats.solWithdrawMin ?? 0.01;
+    const canWithdrawSol =
+      !state.withdrawBusy && (stats.availableSol ?? 0) >= solMin;
+    const canWithdrawToken =
+      !state.withdrawBusy && (stats.availableToken ?? 0) > 0;
     walletSection = `
       <div class="section-title">Your account</div>
       <div class="stats-grid">
         ${renderStatCard("Staked SOL", `${formatSol(stats.stakedSol)} SOL`)}
         ${renderStatCard("Your nodes", stats.yourNodes ?? 0)}
         ${renderStatCard("Wallet issuances", stats.referralWalletOpens ?? 0)}
-        ${renderStatCard("SOL rewards", `${formatSol(stats.rewardSol)} SOL`)}
-        ${renderStatCard("Token rewards", formatSol(stats.rewardToken))}
+        ${renderStatCard("SOL accrued", `${formatSol(stats.rewardSol)} SOL`)}
+        ${renderStatCard("SOL available", `${formatSol(stats.availableSol ?? 0)} SOL`)}
+        ${renderStatCard(`${tokenLabel} accrued`, formatSol(stats.rewardToken))}
+        ${renderStatCard(`${tokenLabel} available`, formatSol(stats.availableToken ?? 0))}
+      </div>
+      <div class="toolbar" style="margin-top: 12px;">
+        <button id="btnWithdrawSol" class="primary" ${canWithdrawSol ? "" : "disabled"}>
+          Withdraw SOL${canWithdrawSol ? ` (${formatSol(stats.availableSol)} SOL)` : ` (min ${formatSol(solMin)} SOL)`}
+        </button>
+        <button id="btnWithdrawToken" class="secondary" ${canWithdrawToken ? "" : "disabled"}>
+          Withdraw ${tokenLabel}${canWithdrawToken ? ` (${formatSol(stats.availableToken)})` : ""}
+        </button>
       </div>`;
   } else {
     walletSection = `
@@ -750,6 +767,52 @@ function bindPersistentEvents() {
         event.preventDefault();
         state.removeConfirmNode = btn.dataset.node;
         renderDashboardShell({ force: true });
+        return;
+      }
+      if (btn.id === "btnWithdrawSol") {
+        event.preventDefault();
+        if (state.withdrawBusy) return;
+        void (async () => {
+          state.withdrawBusy = true;
+          renderDashboardShell({ force: true });
+          try {
+            const result = await call("WithdrawRewardSol");
+            if (!result.ok) {
+              alert(result.error || "SOL withdraw failed");
+              return;
+            }
+            alert(
+              `Sent ${formatSol(result.amountSol)} SOL\nTx: ${result.txSignature || "confirmed"}`,
+            );
+            await refreshDashboard({ force: true });
+          } finally {
+            state.withdrawBusy = false;
+            renderDashboardShell({ force: true });
+          }
+        })();
+        return;
+      }
+      if (btn.id === "btnWithdrawToken") {
+        event.preventDefault();
+        if (state.withdrawBusy) return;
+        void (async () => {
+          state.withdrawBusy = true;
+          renderDashboardShell({ force: true });
+          try {
+            const result = await call("WithdrawRewardToken");
+            if (!result.ok) {
+              alert(result.error || "Token withdraw failed");
+              return;
+            }
+            alert(
+              `Sent ${formatSol(result.amountToken)} ${dashboard.walletStats?.tokenSymbol || "TAICW"}\nTx: ${result.txSignature || "confirmed"}`,
+            );
+            await refreshDashboard({ force: true });
+          } finally {
+            state.withdrawBusy = false;
+            renderDashboardShell({ force: true });
+          }
+        })();
         return;
       }
       if (btn.id === "btnRefresh") {

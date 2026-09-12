@@ -105,3 +105,11 @@ export function StopNode(arg1) {
 export function UnstakeNode(arg1) {
   return window['go']['main']['App']['UnstakeNode'](arg1);
 }
+
+export function WithdrawRewardSol() {
+  return window['go']['main']['App']['WithdrawRewardSol']();
+}
+
+export function WithdrawRewardToken() {
+  return window['go']['main']['App']['WithdrawRewardToken']();
+}

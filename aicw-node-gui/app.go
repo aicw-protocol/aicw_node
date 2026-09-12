@@ -675,7 +675,19 @@ type WalletStatsView struct {
 	ReferralWalletOpens   int     `json:"referralWalletOpens"`
 	RewardSol             float64 `json:"rewardSol"`
 	RewardToken           float64 `json:"rewardToken"`
+	AvailableSol          float64 `json:"availableSol"`
+	AvailableToken        float64 `json:"availableToken"`
+	SolWithdrawMin        float64 `json:"solWithdrawMin"`
+	TokenSymbol           string  `json:"tokenSymbol"`
 	RequiredStakeSol      float64 `json:"requiredStakeSol"`
+}
+
+type WithdrawRewardResult struct {
+	OK          bool    `json:"ok"`
+	AmountSol   float64 `json:"amountSol,omitempty"`
+	AmountToken float64 `json:"amountToken,omitempty"`
+	TxSignature string  `json:"txSignature,omitempty"`
+	Error       string  `json:"error,omitempty"`
 }
 
 type ActivityEventView struct {
@@ -868,10 +880,16 @@ func (a *App) enrichDashboardOverview(view *DashboardView, wallet string, status
 		if status != nil {
 			stats.RequiredStakeSol = status.Eligibility.RequiredStakeSol
 		}
+		if config, err := a.webClient.GetRewardConfig(); err == nil && config != nil {
+			stats.SolWithdrawMin = config.SolWithdrawMin
+			stats.TokenSymbol = config.TokenSymbol
+		}
 		if dash, err := a.webClient.GetWalletDashboard(wallet); err == nil && dash != nil {
 			stats.ReferralWalletOpens = dash.Totals.ReferralWalletOpens
 			stats.RewardSol = dash.Totals.RewardSol
 			stats.RewardToken = dash.Totals.RewardToken
+			stats.AvailableSol = dash.Totals.AvailableSol
+			stats.AvailableToken = dash.Totals.AvailableToken
 			if dash.ActiveStake != nil {
 				stats.StakedSol = dash.ActiveStake.AmountSol
 			}
@@ -1203,6 +1221,52 @@ func (a *App) GetRecommendedLinks() map[string]string {
 		"stakingUrl":   view.Status.GUI.StakingURL,
 		"dashboardUrl": view.Status.GUI.DashboardURL,
 		"registerUrl":  view.Status.GUI.RegisterURL,
+	}
+}
+
+func (a *App) WithdrawRewardSol() WithdrawRewardResult {
+	wallet := a.sessionWallet()
+	if wallet == "" {
+		return WithdrawRewardResult{Error: "Sign in with your wallet first"}
+	}
+	resp, err := a.webClient.WithdrawRewardSol(wallet)
+	if err != nil {
+		return WithdrawRewardResult{Error: err.Error()}
+	}
+	if resp == nil || !resp.Success {
+		msg := "SOL withdraw failed"
+		if resp != nil && resp.Error != "" {
+			msg = resp.Error
+		}
+		return WithdrawRewardResult{Error: msg}
+	}
+	return WithdrawRewardResult{
+		OK:          true,
+		AmountSol:   resp.AmountSol,
+		TxSignature: resp.TxSignature,
+	}
+}
+
+func (a *App) WithdrawRewardToken() WithdrawRewardResult {
+	wallet := a.sessionWallet()
+	if wallet == "" {
+		return WithdrawRewardResult{Error: "Sign in with your wallet first"}
+	}
+	resp, err := a.webClient.WithdrawRewardToken(wallet)
+	if err != nil {
+		return WithdrawRewardResult{Error: err.Error()}
+	}
+	if resp == nil || !resp.Success {
+		msg := "Token withdraw failed"
+		if resp != nil && resp.Error != "" {
+			msg = resp.Error
+		}
+		return WithdrawRewardResult{Error: msg}
+	}
+	return WithdrawRewardResult{
+		OK:          true,
+		AmountToken: resp.AmountToken,
+		TxSignature: resp.TxSignature,
 	}
 }
 

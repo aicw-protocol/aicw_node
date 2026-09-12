@@ -53,3 +53,7 @@ export function StartNode(arg1:string):Promise<main.NodeActionResult>;
 export function StopNode(arg1:string):Promise<main.NodeActionResult>;
 
 export function UnstakeNode(arg1:string):Promise<main.UnstakeNodeResult>;
+
+export function WithdrawRewardSol():Promise<main.WithdrawRewardResult>;
+
+export function WithdrawRewardToken():Promise<main.WithdrawRewardResult>;

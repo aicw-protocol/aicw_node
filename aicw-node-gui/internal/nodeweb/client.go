@@ -309,12 +309,116 @@ type DashboardTotals struct {
 	ReferralWalletOpens int     `json:"referralWalletOpens"`
 	RewardSol           float64 `json:"rewardSol"`
 	RewardToken         float64 `json:"rewardToken"`
+	AvailableSol        float64 `json:"availableSol"`
+	AvailableToken      float64 `json:"availableToken"`
+}
+
+type RewardConfigResponse struct {
+	TreasuryWallet       string  `json:"treasuryWallet"`
+	WalletIssuanceFeeSol float64 `json:"walletIssuanceFeeSol"`
+	SolWithdrawMin       float64 `json:"solWithdrawMin"`
+	TokenSymbol          string  `json:"tokenSymbol"`
+	TokenMint            string  `json:"tokenMint"`
+}
+
+type WithdrawRewardAPIResponse struct {
+	Success     bool    `json:"success"`
+	AmountSol   float64 `json:"amountSol"`
+	AmountToken float64 `json:"amountToken"`
+	TxSignature string  `json:"txSignature"`
+	Error       string  `json:"error"`
 }
 
 type WalletDashboardResponse struct {
 	Nodes       []DashboardNode `json:"nodes"`
 	ActiveStake *DashboardStake `json:"activeStake"`
 	Totals      DashboardTotals `json:"totals"`
+}
+
+func (c *Client) GetRewardConfig() (*RewardConfigResponse, error) {
+	resp, err := c.HTTPClient.Get(c.BaseURL + "/api/rewards/config")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("reward config %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var out RewardConfigResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) WithdrawRewardSol(ownerWallet string) (*WithdrawRewardAPIResponse, error) {
+	payload := map[string]string{"ownerWallet": ownerWallet}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.HTTPClient.Post(
+		c.BaseURL+"/api/rewards/withdraw/sol",
+		"application/json",
+		strings.NewReader(string(raw)),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var out WithdrawRewardAPIResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 && out.Error == "" {
+		out.Error = strings.TrimSpace(string(body))
+	}
+	return &out, nil
+}
+
+func (c *Client) WithdrawRewardToken(ownerWallet string) (*WithdrawRewardAPIResponse, error) {
+	payload := map[string]string{"ownerWallet": ownerWallet}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.HTTPClient.Post(
+		c.BaseURL+"/api/rewards/withdraw/token",
+		"application/json",
+		strings.NewReader(string(raw)),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var out WithdrawRewardAPIResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 && out.Error == "" {
+		out.Error = strings.TrimSpace(string(body))
+	}
+	return &out, nil
 }
 
 func (c *Client) GetWalletDashboard(wallet string) (*WalletDashboardResponse, error) {
