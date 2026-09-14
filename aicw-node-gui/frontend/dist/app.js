@@ -542,7 +542,7 @@ function renderOverviewTab(dashboard) {
       ${renderStatCard("Registered nodes", network.registeredNodes ?? "—")}
       ${renderStatCard("Active nodes", network.activeNodes ?? "—")}
       ${renderStatCard("Wallet issuances", network.totalWalletOpens ?? "—")}
-      ${renderStatCard("Network SOL rewards", network.totalRewardSol != null ? `${formatSol(network.totalRewardSol)} SOL` : "—")}
+      ${renderStatCard("SOL accrued (network)", network.totalRewardSol != null ? `${formatSol(network.totalRewardSol)} SOL` : "—")}
     </div>`;
 
   let walletSection = "";
@@ -558,11 +558,11 @@ function renderOverviewTab(dashboard) {
       <div class="stats-grid">
         ${renderStatCard("Staked SOL", `${formatSol(stats.stakedSol)} SOL`)}
         ${renderStatCard("Your nodes", stats.yourNodes ?? 0)}
-        ${renderStatCard("Wallet issuances", stats.referralWalletOpens ?? 0)}
-        ${renderStatCard("SOL accrued", `${formatSol(stats.rewardSol)} SOL`)}
-        ${renderStatCard("SOL available", `${formatSol(stats.availableSol ?? 0)} SOL`)}
-        ${renderStatCard(`${tokenLabel} accrued`, formatSol(stats.rewardToken))}
-        ${renderStatCard(`${tokenLabel} available`, formatSol(stats.availableToken ?? 0))}
+        ${renderStatCard("Wallets", stats.referralWalletOpens ?? 0)}
+        ${renderStatCard("Total SOL", `${formatSol(stats.rewardSol)} SOL`)}
+        ${renderStatCard("Claimable SOL", `${formatSol(stats.availableSol ?? 0)} SOL`)}
+        ${renderStatCard(`Total ${tokenLabel}`, formatSol(stats.rewardToken))}
+        ${renderStatCard(`Claimable ${tokenLabel}`, formatSol(stats.availableToken ?? 0))}
       </div>
       <div class="toolbar" style="margin-top: 12px;">
         <button id="btnWithdrawSol" class="primary" ${canWithdrawSol ? "" : "disabled"}>
