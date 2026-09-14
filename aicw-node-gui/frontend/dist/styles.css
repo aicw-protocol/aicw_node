@@ -419,6 +419,34 @@ button.danger:not(:disabled):hover {
   padding: 8px 10px;
   border-top: 1px solid var(--border);
   background: var(--btn-bg);
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.node-actions-primary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+button.btn-remove-node {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--danger);
+  padding: 6px 4px;
+}
+
+button.btn-remove-node:not(:disabled):hover {
+  background: transparent;
+  border: none;
+  text-decoration: underline;
+}
+
+button.btn-remove-node:disabled {
+  background: transparent;
+  border: none;
 }
 
 .badge {

@@ -387,9 +387,11 @@ function renderNodeItem(node, dashboard) {
         <div class="node-badges">${badges.join("")}</div>
       </div>
       <div class="toolbar node-actions">
-        <button class="primary btn-start-node" data-node="${escapeHtml(node.nodeName)}" ${canStart ? "" : "disabled"} title="${escapeHtml(blockReason || "Start this node")}">Start</button>
-        <button class="btn-stop-node" data-node="${escapeHtml(node.nodeName)}" ${canStop ? "" : "disabled"}>Stop</button>
-        <button class="btn-remove-node danger" data-node="${escapeHtml(node.nodeName)}" ${canRemove ? "" : "disabled"}>Remove node</button>
+        <div class="node-actions-primary">
+          <button class="primary btn-start-node" data-node="${escapeHtml(node.nodeName)}" ${canStart ? "" : "disabled"} title="${escapeHtml(blockReason || "Start this node")}">Start</button>
+          <button class="btn-stop-node" data-node="${escapeHtml(node.nodeName)}" ${canStop ? "" : "disabled"}>Stop</button>
+        </div>
+        <button class="btn-remove-node" data-node="${escapeHtml(node.nodeName)}" ${canRemove ? "" : "disabled"}>Remove</button>
       </div>
       <div class="node-details ${expanded ? "open" : ""}">
         <div class="node-meta">
