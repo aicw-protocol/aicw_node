@@ -15,6 +15,10 @@ consul:
 
 mpc_threshold: 2
 
+# Key families generated per keygen — must be identical on every node.
+# AICW is Solana-only, so only ed25519 is generated (default when omitted).
+keygen_key_types: [ed25519]
+
 eligibility:
   membership:
     mode: whitelist

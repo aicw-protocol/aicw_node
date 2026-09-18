@@ -24,6 +24,11 @@ consul:
 
 mpc_threshold: 2
 
+# Fallback key families for keygen requests that carry no key_types.
+# Normally the Bridge decides per request (its own keygen_key_types), so
+# operators never need to change this. Default when omitted: [ed25519].
+keygen_key_types: [ed25519]
+
 eligibility:
   membership:
     mode: whitelist

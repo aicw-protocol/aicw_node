@@ -7,6 +7,7 @@ package mpc
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -925,6 +926,22 @@ func (r *DynamicRegistry) EnsureCeremonyReady(committee []string) error {
 		return nil
 	}
 
+	// AICW-FORK (dispatcher gate): the JetStream keygen/reshare consumer is a
+	// shared work-queue, so the node that receives a request is frequently NOT
+	// a member of that wallet's committee (with 20 nodes and a 5-node committee,
+	// 75% of requests land on a non-member). Such a node only fans the request
+	// out; it never joins the TSS session, so it needs no symmetric keys with
+	// the committee and must not be blocked by the `selfIncluded` rule below
+	// (which previously spun until the ECDH-gate timeout and surfaced as a
+	// Bridge 504). A non-member verifies only that every committee member is
+	// Consul-ready; members enforce the full ECDH gate in CreateKeyGenSession.
+	if !slices.Contains(committee, r.nodeID) {
+		if missing := r.committeeNotReady(committee); len(missing) > 0 {
+			return fmt.Errorf("cluster not ready: committee members not ready: %v", missing)
+		}
+		return nil
+	}
+
 	if err := r.EnsureCeremonyECDH(committee); err != nil {
 		return fmt.Errorf("ensure committee ECDH: %w", err)
 	}
@@ -944,10 +961,34 @@ func (r *DynamicRegistry) EnsureCeremonyReady(committee []string) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
+			// Do not leave the ECDH session scoped to this committee on failure;
+			// otherwise the periodic broadcast keeps counting against a stale
+			// committee-sized target instead of the full mesh.
+			if r.ecdhSession != nil {
+				r.ecdhSession.ClearCeremonyScope()
+			}
 			return fmt.Errorf("ecdh_not_ready: committee ECDH incomplete after %s", timeout)
 		}
 		time.Sleep(ReadinessCheckPeriod)
 	}
+}
+
+// committeeNotReady returns the committee members (excluding self) that are not
+// currently Consul-ready from this node's point of view. AICW-FORK.
+func (r *DynamicRegistry) committeeNotReady(committee []string) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var missing []string
+	for _, id := range committee {
+		if id == r.nodeID {
+			continue
+		}
+		if !r.readyMap[id] {
+			missing = append(missing, id)
+		}
+	}
+	return missing
 }
 
 // AreMajorityReady returns true if majority peers are ready.

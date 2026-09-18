@@ -195,7 +195,11 @@ func (o *Orchestrator) reconcileOnce(ctx context.Context) {
 		}
 
 		sessionID := uuid.New().String()
-		acquired, err := o.lock.Acquire(w.ID, sessionID, []string{string(KeyKindEddsa), string(KeyKindEcdsa)})
+		pendingKinds := make([]string, 0, 2)
+		for _, kt := range AttemptedKeyTypes(WalletKeyTypes(w)) {
+			pendingKinds = append(pendingKinds, string(keyKindFor(kt)))
+		}
+		acquired, err := o.lock.Acquire(w.ID, sessionID, pendingKinds)
 		if err != nil {
 			logger.Error("Reconcile: lock acquire failed", err, "walletID", w.ID)
 			deferred++
@@ -244,6 +248,11 @@ func (o *Orchestrator) runReshare(ctx context.Context, w Wallet, old []string, p
 		logger.Warn("Reshare: pending progress read failed; resharing all key types",
 			"walletID", w.ID, "error", perr.Error())
 		only = nil
+	}
+	if len(only) == 0 {
+		// No partial progress: reshare exactly the families this wallet has
+		// (Ed25519-only wallets must not attempt an ECDSA reshare).
+		only = WalletKeyTypes(w)
 	}
 	attempted := AttemptedKeyTypes(only)
 

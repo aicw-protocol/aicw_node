@@ -100,6 +100,22 @@ func AttemptedKeyTypes(only []types.KeyType) []types.KeyType {
 	return only
 }
 
+// WalletKeyTypes returns, in canonical reshare order, the key families the
+// wallet actually holds keyinfo for. AICW-FORK: keygen generates only the
+// families in `keygen_key_types` (default Ed25519 only), so a wallet may have no
+// ECDSA key at all; attempting to reshare a missing family would fail every
+// pass and leave the wallet in a permanent failure/cooldown loop. Returns nil
+// (→ full set via AttemptedKeyTypes) when the wallet record carries no keys.
+func WalletKeyTypes(w Wallet) []types.KeyType {
+	var out []types.KeyType
+	for _, kt := range reshareKeyTypes {
+		if _, ok := w.Keys[keyKindFor(kt)]; ok {
+			out = append(out, kt)
+		}
+	}
+	return out
+}
+
 // RemainingKeyTypes returns the attempted families that did not complete, in
 // their canonical reshare order — used to persist §7.1 partial progress.
 func RemainingKeyTypes(attempted []types.KeyType, done map[types.KeyType]bool) []types.KeyType {
