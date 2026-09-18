@@ -120,7 +120,17 @@ func (c *Client) VerifyLogin(challengeToken, wallet, signatureBase64, message st
 }
 
 func AuthGUIURL(baseURL, callbackURL string) string {
-	return fmt.Sprintf("%s/auth/gui?callback=%s", strings.TrimRight(baseURL, "/"), url.QueryEscape(callbackURL))
+	return AuthGUILoginURL(baseURL, callbackURL, "")
+}
+
+func AuthGUILoginURL(baseURL, callbackURL, expectedWallet string) string {
+	params := url.Values{}
+	params.Set("callback", callbackURL)
+	params.Set("purpose", "login")
+	if strings.TrimSpace(expectedWallet) != "" {
+		params.Set("expectedWallet", strings.TrimSpace(expectedWallet))
+	}
+	return fmt.Sprintf("%s/auth/gui?%s", strings.TrimRight(baseURL, "/"), params.Encode())
 }
 
 func AuthRegisterURL(baseURL, callbackURL, nodeID, nodeName, publicKey string) string {

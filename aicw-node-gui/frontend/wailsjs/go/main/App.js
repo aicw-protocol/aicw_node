@@ -86,8 +86,8 @@ export function SetWalletAddress(arg1) {
   return window['go']['main']['App']['SetWalletAddress'](arg1);
 }
 
-export function SignInWithBrowser() {
-  return window['go']['main']['App']['SignInWithBrowser']();
+export function SignInWithBrowser(arg1) {
+  return window['go']['main']['App']['SignInWithBrowser'](arg1);
 }
 
 export function SignOut() {

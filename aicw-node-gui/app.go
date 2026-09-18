@@ -19,6 +19,7 @@ import (
 	"github.com/aicw/aicw_node/aicw-node-gui/internal/nodeweb"
 	"github.com/aicw/aicw_node/aicw-node-gui/internal/releases"
 	"github.com/aicw/aicw_node/aicw-node-gui/internal/setupfiles"
+	"github.com/aicw/aicw_node/aicw-node-gui/internal/wallethistory"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -157,14 +158,15 @@ func (a *App) saveSessionLocked() error {
 }
 
 type BootstrapView struct {
-	Installed       bool   `json:"installed"`
-	InstallDir      string `json:"installDir"`
-	DefaultInstallDir string `json:"defaultInstallDir"`
-	WebBaseURL      string `json:"webBaseUrl"`
-	Version         string `json:"version"`
-	Wallet          string `json:"wallet,omitempty"`
-	WalletVerified  bool   `json:"walletVerified"`
-	NodeRunning     bool   `json:"nodeRunning"`
+	Installed         bool     `json:"installed"`
+	InstallDir        string   `json:"installDir"`
+	DefaultInstallDir string   `json:"defaultInstallDir"`
+	WebBaseURL        string   `json:"webBaseUrl"`
+	Version           string   `json:"version"`
+	Wallet            string   `json:"wallet,omitempty"`
+	WalletVerified    bool     `json:"walletVerified"`
+	KnownWallets      []string `json:"knownWallets,omitempty"`
+	NodeRunning       bool     `json:"nodeRunning"`
 }
 
 func (a *App) GetBootstrap() BootstrapView {
@@ -183,7 +185,31 @@ func (a *App) GetBootstrap() BootstrapView {
 		view.Wallet = a.session.Wallet
 		view.WalletVerified = a.session.Verified
 	}
+	view.KnownWallets = a.knownWalletsLocked()
 	return view
+}
+
+func (a *App) knownWalletsLocked() []string {
+	known, err := wallethistory.ListWallets(a.installDir)
+	if err != nil {
+		known = nil
+	}
+	if a.session != nil {
+		wallet := strings.TrimSpace(a.session.Wallet)
+		if wallet != "" && !containsString(known, wallet) {
+			known = append([]string{wallet}, known...)
+		}
+	}
+	return known
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 type ReleaseUpdateView struct {
@@ -277,7 +303,9 @@ type BrowserSignInResult struct {
 	AuthURL string `json:"authUrl,omitempty"`
 }
 
-func (a *App) SignInWithBrowser() BrowserSignInResult {
+func (a *App) SignInWithBrowser(expectedWallet string) BrowserSignInResult {
+	expectedWallet = strings.TrimSpace(expectedWallet)
+
 	ctx, cancel := context.WithCancel(a.ctx)
 	defer cancel()
 
@@ -286,12 +314,19 @@ func (a *App) SignInWithBrowser() BrowserSignInResult {
 		return BrowserSignInResult{Error: err.Error()}
 	}
 
-	authURL := nodeweb.AuthGUIURL(a.webClient.BaseURL, callbackURL)
+	authURL := nodeweb.AuthGUILoginURL(a.webClient.BaseURL, callbackURL, expectedWallet)
 	runtime.BrowserOpenURL(a.ctx, authURL)
 
 	result, err := server.WaitResult(3 * time.Minute)
 	if err != nil {
 		return BrowserSignInResult{Error: err.Error(), AuthURL: authURL}
+	}
+
+	if expectedWallet != "" && result.Wallet != expectedWallet {
+		return BrowserSignInResult{
+			Error:   "Signed wallet does not match the wallet selected in the desktop app.",
+			AuthURL: authURL,
+		}
 	}
 
 	verify, err := a.webClient.VerifyLogin(
@@ -305,6 +340,7 @@ func (a *App) SignInWithBrowser() BrowserSignInResult {
 	}
 
 	a.mu.Lock()
+	installDir := a.installDir
 	a.session = &Session{
 		Wallet:   verify.Wallet,
 		Verified: true,
@@ -312,6 +348,8 @@ func (a *App) SignInWithBrowser() BrowserSignInResult {
 	}
 	_ = a.saveSessionLocked()
 	a.mu.Unlock()
+
+	_ = wallethistory.RecordLogin(installDir, verify.Wallet)
 
 	return BrowserSignInResult{OK: true, Wallet: verify.Wallet, AuthURL: authURL}
 }
@@ -369,7 +407,7 @@ func (a *App) emitRegisterFailure(authURL, message string) {
 	a.finishRegisterJob(RegisterNodeResult{Error: message, AuthURL: authURL})
 }
 
-func (a *App) configureLocalNodeFiles(installDir string, generated *nodeidentity.Generated) error {
+func (a *App) configureLocalNodeFiles(installDir string, generated *nodeidentity.Generated, ownerWallet string) error {
 	onboarding, err := a.webClient.GetOnboardingConfig()
 	if err != nil {
 		return err
@@ -383,7 +421,7 @@ func (a *App) configureLocalNodeFiles(installDir string, generated *nodeidentity
 	if _, err := setupfiles.EnsureSharedFiles(installDir, onboarding.NetworkConfigYaml, operatorYAML); err != nil {
 		return err
 	}
-	return nodeidentity.WriteFiles(installDir, generated)
+	return nodeidentity.WriteFiles(installDir, generated, ownerWallet)
 }
 
 func (a *App) runRegisterNodeJob(
@@ -402,7 +440,7 @@ func (a *App) runRegisterNodeJob(
 	}
 
 	a.setRegisterPhase("configuring")
-	if err := a.configureLocalNodeFiles(installDir, generated); err != nil {
+	if err := a.configureLocalNodeFiles(installDir, generated, wallet); err != nil {
 		a.emitRegisterFailure(authURL, err.Error())
 		return
 	}
@@ -716,9 +754,11 @@ type DashboardView struct {
 	SharedMissing      []string      `json:"sharedMissing"`
 	Offboard           *OffboardStatusView `json:"offboard,omitempty"`
 	Network            *NetworkOverviewView `json:"network,omitempty"`
-	WalletStats        *WalletStatsView     `json:"walletStats,omitempty"`
-	Activity           []ActivityEventView  `json:"activity,omitempty"`
-	Nodes              []NodeRowView `json:"nodes"`
+	WalletStats           *WalletStatsView    `json:"walletStats,omitempty"`
+	Activity              []ActivityEventView `json:"activity,omitempty"`
+	Nodes                 []NodeRowView       `json:"nodes"`
+	RequiresWalletSignIn  bool                `json:"requiresWalletSignIn"`
+	KnownWallets          []string            `json:"knownWallets,omitempty"`
 }
 
 func (a *App) GetDashboard() DashboardView {
@@ -768,16 +808,14 @@ func (a *App) GetDashboard() DashboardView {
 	}
 	activeIDs, _ := a.webClient.GetActiveNodeIDs()
 
-	if wallet == "" {
-		for _, local := range localNodes {
-			view.Nodes = append(view.Nodes, nodeRowFromLocal(local, runningNodes, "local_only", false))
-		}
-		if len(view.Nodes) == 0 {
-			view.Error = "Sign in to manage your registered nodes."
-		} else {
-			view.OK = true
-		}
-		a.enrichDashboardOverview(&view, wallet, nil, activeIDs)
+	a.mu.Lock()
+	view.KnownWallets = a.knownWalletsLocked()
+	a.mu.Unlock()
+
+	if wallet == "" || !walletVerified {
+		view.RequiresWalletSignIn = true
+		view.OK = true
+		a.enrichDashboardOverview(&view, "", nil, activeIDs)
 		return view
 	}
 
@@ -785,6 +823,9 @@ func (a *App) GetDashboard() DashboardView {
 	if err != nil {
 		view.Error = err.Error()
 		for _, local := range localNodes {
+			if !localNodeBelongsToWallet(local, wallet) {
+				continue
+			}
 			view.Nodes = append(view.Nodes, nodeRowFromLocal(local, runningNodes, "local_only", false))
 		}
 		if len(view.Nodes) > 0 {
@@ -837,6 +878,9 @@ func (a *App) GetDashboard() DashboardView {
 
 	for _, local := range localNodes {
 		if seen[local.NodeName] {
+			continue
+		}
+		if !localNodeBelongsToWallet(local, wallet) {
 			continue
 		}
 		view.Nodes = append(view.Nodes, nodeRowFromLocal(local, runningNodes, "local_only", pendingUnstake))
@@ -914,6 +958,18 @@ func (a *App) enrichDashboardOverview(view *DashboardView, wallet string, status
 	}
 
 	view.Activity = mapActivityEvents(a.activityTracker.Events())
+}
+
+func localNodeBelongsToWallet(local install.NodeLocalSetup, wallet string) bool {
+	wallet = strings.TrimSpace(wallet)
+	if wallet == "" {
+		return false
+	}
+	owner := strings.TrimSpace(local.OwnerWallet)
+	if owner == "" {
+		return false
+	}
+	return owner == wallet
 }
 
 func canRemoveNode(webStatus, nodeID string, pendingUnstake bool) bool {

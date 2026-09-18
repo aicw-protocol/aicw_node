@@ -157,9 +157,10 @@ type LocalSetup struct {
 }
 
 type identityFile struct {
-	NodeName  string `json:"node_name"`
-	NodeID    string `json:"node_id"`
-	PublicKey string `json:"public_key"`
+	NodeName    string `json:"node_name"`
+	NodeID      string `json:"node_id"`
+	PublicKey   string `json:"public_key"`
+	OwnerWallet string `json:"owner_wallet"`
 }
 
 type SharedSetup struct {
@@ -174,6 +175,7 @@ type NodeLocalSetup struct {
 	NodeName        string   `json:"nodeName"`
 	NodeID          string   `json:"nodeId,omitempty"`
 	PublicKey       string   `json:"publicKey,omitempty"`
+	OwnerWallet     string   `json:"ownerWallet,omitempty"`
 	IdentityFound   bool     `json:"identityFound"`
 	PrivateKeyFound bool     `json:"privateKeyFound"`
 	ReadyToStart    bool     `json:"readyToStart"`
@@ -258,6 +260,7 @@ func buildNodeLocalSetup(installDir string, shared *SharedSetup, identity identi
 		NodeName:     identity.NodeName,
 		NodeID:       identity.NodeID,
 		PublicKey:    identity.PublicKey,
+		OwnerWallet:  strings.TrimSpace(identity.OwnerWallet),
 		MissingItems: append([]string{}, shared.MissingItems...),
 	}
 	identityPath := filepath.Join(installDir, "identity", identity.NodeName+"_identity.json")

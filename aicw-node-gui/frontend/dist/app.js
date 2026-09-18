@@ -28,6 +28,9 @@ const state = {
   logNodeFilter: "all",
   persistentEventsBound: false,
   withdrawBusy: false,
+  selectedWallet: "",
+  signInBusy: false,
+  knownWallets: [],
 };
 
 const LICENSE_TEXT = `AICW Node Operator Software
@@ -324,9 +327,55 @@ function renderComplete() {
     <button id="btnOpenDashboard" class="primary">Open AICW Node</button>
   `);
   document.getElementById("btnOpenDashboard").onclick = () => {
-    state.step = "dashboard";
+    state.step = "wallet-gate";
     state.tab = "overview";
     render();
+  };
+}
+
+function renderWalletGate(knownWallets) {
+  setHeader("");
+  setTabBar(false);
+  const wallets = Array.isArray(knownWallets) ? knownWallets : [];
+  if (!state.selectedWallet && wallets.length > 0) {
+    state.selectedWallet = wallets[0];
+  }
+
+  const walletOptions =
+    wallets.length > 0
+      ? wallets
+          .map(
+            (wallet) => `
+        <label class="wallet-option ${state.selectedWallet === wallet ? "selected" : ""}">
+          <input type="radio" name="walletChoice" value="${escapeHtml(wallet)}" ${state.selectedWallet === wallet ? "checked" : ""} />
+          <span class="wallet-option-label" title="${escapeHtml(wallet)}">${escapeHtml(formatWalletLabel(wallet))}</span>
+        </label>`,
+          )
+          .join("")
+      : `<p class="muted">No previous wallets on this computer. Sign in with your browser wallet to continue.</p>`;
+
+  document.getElementById("screenRoot").innerHTML = `
+    <section class="panel panel-wide wallet-gate">
+      <h1>Connect wallet</h1>
+      <p class="section-desc muted">Choose the Solana wallet you use on AICW Node Web, then approve sign-in in your browser.</p>
+      <div class="wallet-option-list">${walletOptions}</div>
+      <div class="wallet-gate-actions">
+        <button id="btnWalletGateLogin" class="primary" ${state.signInBusy ? "disabled" : ""}>
+          ${state.signInBusy ? "Waiting for browser…" : "Sign in"}
+        </button>
+      </div>
+      <p class="muted wallet-gate-hint">Use the same wallet account in your browser extension that you select here.</p>
+    </section>`;
+  setFooter(`<span class="muted">${escapeHtml(state.installDir || "")}</span>`);
+
+  document.querySelectorAll('input[name="walletChoice"]').forEach((input) => {
+    input.addEventListener("change", () => {
+      state.selectedWallet = input.value;
+      renderWalletGate(wallets);
+    });
+  });
+  document.getElementById("btnWalletGateLogin").onclick = () => {
+    void handleBrowserSignIn(state.selectedWallet || "");
   };
 }
 
@@ -724,13 +773,33 @@ function renderDashboardHeader(dashboard) {
   `);
 }
 
-async function handleBrowserSignIn() {
+async function handleBrowserSignIn(expectedWallet) {
+  if (state.signInBusy) return;
+  state.signInBusy = true;
+  if (state.step === "wallet-gate") {
+    renderWalletGate(state.dashboard?.knownWallets || state.knownWallets || []);
+  }
   try {
-    const result = await call("SignInWithBrowser");
-    if (!result.ok) alert(result.error || "Browser sign-in failed");
+    const result = await call("SignInWithBrowser", expectedWallet || "");
+    if (!result.ok) {
+      alert(result.error || "Browser sign-in failed");
+      return;
+    }
+    const wallet = result.wallet || expectedWallet || "";
+    state.selectedWallet = wallet;
+    if (wallet && !(state.knownWallets || []).includes(wallet)) {
+      state.knownWallets = [wallet, ...(state.knownWallets || [])];
+    }
+    state.step = "dashboard";
+    state.tab = "overview";
     await refreshDashboard({ force: true });
   } catch (error) {
     alert(String(error));
+  } finally {
+    state.signInBusy = false;
+    if (state.step === "wallet-gate") {
+      renderWalletGate(state.dashboard?.knownWallets || state.knownWallets || []);
+    }
   }
 }
 
@@ -757,6 +826,9 @@ async function handleHeaderSignOut(dashboard) {
     return;
   }
   await call("SignOut");
+  state.selectedWallet = "";
+  state.step = "wallet-gate";
+  state.dashboard = null;
   await refreshDashboard({ force: true });
 }
 
@@ -788,7 +860,7 @@ function bindPersistentEvents() {
       }
       if (btn.id === "btnBrowserSignIn" || btn.id === "btnHeaderSignIn") {
         event.preventDefault();
-        void handleBrowserSignIn();
+        void handleBrowserSignIn(dashboard.wallet || state.selectedWallet || "");
         return;
       }
       if (btn.classList.contains("btn-start-node")) {
@@ -1100,6 +1172,17 @@ function renderDashboardShell(options = {}) {
   const dashboard = state.dashboard || { nodes: [] };
   const background = Boolean(options.background);
 
+  if (dashboard.requiresWalletSignIn) {
+    state.step = "wallet-gate";
+    const wallets = dashboard.knownWallets || state.knownWallets || [];
+    state.knownWallets = wallets;
+    if (!state.selectedWallet && wallets.length) {
+      state.selectedWallet = wallets[0];
+    }
+    renderWalletGate(wallets);
+    return;
+  }
+
   if (background) {
     const signature = renderSignature(dashboard);
     if (signature === lastRenderSignature) return;
@@ -1145,6 +1228,9 @@ function render() {
   if (state.step === "path") return renderPath();
   if (state.step === "installing") return renderInstalling();
   if (state.step === "complete") return renderComplete();
+  if (state.step === "wallet-gate") {
+    return renderWalletGate(state.dashboard?.knownWallets || state.knownWallets || []);
+  }
   if (state.step === "dashboard") return renderDashboard();
 }
 
@@ -1158,7 +1244,13 @@ async function boot() {
     document.getElementById("versionLabel").textContent = `v${bootstrap.version}`;
     document.getElementById("footerMeta").textContent = bootstrap.webBaseUrl;
     await refreshReleaseUpdate(true);
-    state.step = bootstrap.installed ? "dashboard" : "license";
+    if (bootstrap.installed) {
+      state.knownWallets = bootstrap.knownWallets || [];
+      state.selectedWallet = bootstrap.wallet || state.knownWallets[0] || "";
+      state.step = bootstrap.walletVerified ? "dashboard" : "wallet-gate";
+    } else {
+      state.step = "license";
+    }
     render();
   } catch (error) {
     setTabBar(false);

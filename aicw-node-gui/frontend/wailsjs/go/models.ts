@@ -63,6 +63,7 @@ export namespace main {
 	    version: string;
 	    wallet?: string;
 	    walletVerified: boolean;
+	    knownWallets?: string[];
 	    nodeRunning: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -78,6 +79,7 @@ export namespace main {
 	        this.version = source["version"];
 	        this.wallet = source["wallet"];
 	        this.walletVerified = source["walletVerified"];
+	        this.knownWallets = source["knownWallets"];
 	        this.nodeRunning = source["nodeRunning"];
 	    }
 	}
@@ -155,26 +157,6 @@ export namespace main {
 	        this.requiredStakeSol = source["requiredStakeSol"];
 	    }
 	}
-	export class WithdrawRewardResult {
-	    ok: boolean;
-	    amountSol: number;
-	    amountToken: number;
-	    txSignature: string;
-	    error: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new WithdrawRewardResult(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ok = source["ok"];
-	        this.amountSol = source["amountSol"];
-	        this.amountToken = source["amountToken"];
-	        this.txSignature = source["txSignature"];
-	        this.error = source["error"];
-	    }
-	}
 	export class NetworkOverviewView {
 	    registeredNodes: number;
 	    activeNodes: number;
@@ -232,6 +214,8 @@ export namespace main {
 	    walletStats?: WalletStatsView;
 	    activity?: ActivityEventView[];
 	    nodes: NodeRowView[];
+	    requiresWalletSignIn: boolean;
+	    knownWallets?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new DashboardView(source);
@@ -243,6 +227,8 @@ export namespace main {
 	        this.error = source["error"];
 	        this.wallet = source["wallet"];
 	        this.walletVerified = source["walletVerified"];
+	        this.requiresWalletSignIn = source["requiresWalletSignIn"];
+	        this.knownWallets = source["knownWallets"];
 	        this.installDir = source["installDir"];
 	        this.installed = source["installed"];
 	        this.runningNodeName = source["runningNodeName"];
@@ -450,6 +436,26 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class WithdrawRewardResult {
+	    ok: boolean;
+	    amountSol?: number;
+	    amountToken?: number;
+	    txSignature?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WithdrawRewardResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.amountSol = source["amountSol"];
+	        this.amountToken = source["amountToken"];
+	        this.txSignature = source["txSignature"];
+	        this.error = source["error"];
+	    }
 	}
 
 }

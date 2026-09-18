@@ -18,10 +18,11 @@ import (
 var nodeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{1,63}$`)
 
 type Identity struct {
-	NodeName  string `json:"node_name"`
-	NodeID    string `json:"node_id"`
-	PublicKey string `json:"public_key"`
-	CreatedAt string `json:"created_at"`
+	NodeName     string `json:"node_name"`
+	NodeID       string `json:"node_id"`
+	PublicKey    string `json:"public_key"`
+	CreatedAt    string `json:"created_at"`
+	OwnerWallet  string `json:"owner_wallet,omitempty"`
 }
 
 type Generated struct {
@@ -87,7 +88,7 @@ func Generate(nodeName string) (*Generated, error) {
 	}, nil
 }
 
-func WriteFiles(installDir string, generated *Generated) error {
+func WriteFiles(installDir string, generated *Generated, ownerWallet string) error {
 	if generated == nil {
 		return fmt.Errorf("identity is required")
 	}
@@ -106,7 +107,21 @@ func WriteFiles(installDir string, generated *Generated) error {
 		return fmt.Errorf("private key file already exists for %s", generated.NodeName)
 	}
 
-	if err := os.WriteFile(identityPath, []byte(generated.IdentityJSON), 0o600); err != nil {
+	identityJSON := generated.IdentityJSON
+	if strings.TrimSpace(ownerWallet) != "" {
+		var identity Identity
+		if err := json.Unmarshal([]byte(generated.IdentityJSON), &identity); err != nil {
+			return fmt.Errorf("failed to parse identity json: %w", err)
+		}
+		identity.OwnerWallet = strings.TrimSpace(ownerWallet)
+		encoded, err := json.MarshalIndent(identity, "", "  ")
+		if err != nil {
+			return err
+		}
+		identityJSON = string(encoded) + "\n"
+	}
+
+	if err := os.WriteFile(identityPath, []byte(identityJSON), 0o600); err != nil {
 		return err
 	}
 	return os.WriteFile(privateKeyPath, []byte(generated.PrivateKeyHex), 0o600)

@@ -44,7 +44,7 @@ export function SetInstallScope(arg1:string):Promise<void>;
 
 export function SetWalletAddress(arg1:string):Promise<main.BrowserSignInResult>;
 
-export function SignInWithBrowser():Promise<main.BrowserSignInResult>;
+export function SignInWithBrowser(arg1:string):Promise<main.BrowserSignInResult>;
 
 export function SignOut():Promise<void>;
 
